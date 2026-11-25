@@ -281,6 +281,32 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Sign in · Flow Notes</title>
+<script>
+  // Paint the stored theme before the stylesheet is parsed; the module at the end of the body
+  // only runs after the first paint. Keep in sync with applyTheme() in ui.js.
+  (() => {
+    const root = document.documentElement;
+    let choice = "system";
+    try {
+      const stored = localStorage.getItem("flownotes:theme");
+      if (stored === "light" || stored === "dark" || stored === "system") choice = stored;
+    } catch (error) {
+      /* Storage may be blocked; the system preference is still a sane default. */
+    }
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolved = choice === "system" ? (systemDark ? "dark" : "light") : choice;
+    root.dataset.theme = resolved;
+    root.style.colorScheme = resolved;
+    try {
+      const tone = localStorage.getItem("flownotes:tone");
+      if (["neutral", "blue", "pink", "red", "yellow", "cyan"].includes(tone)) {
+        root.dataset.tone = tone;
+      }
+    } catch (error) {
+      /* Same as above; the neutral scheme is the default anyway. */
+    }
+  })();
+</script>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/vendor/app.css">
 </head>
@@ -376,6 +402,32 @@ SETUP_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Set up · Flow Notes</title>
+<script>
+  // Paint the stored theme before the stylesheet is parsed; the module at the end of the body
+  // only runs after the first paint. Keep in sync with applyTheme() in ui.js.
+  (() => {
+    const root = document.documentElement;
+    let choice = "system";
+    try {
+      const stored = localStorage.getItem("flownotes:theme");
+      if (stored === "light" || stored === "dark" || stored === "system") choice = stored;
+    } catch (error) {
+      /* Storage may be blocked; the system preference is still a sane default. */
+    }
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolved = choice === "system" ? (systemDark ? "dark" : "light") : choice;
+    root.dataset.theme = resolved;
+    root.style.colorScheme = resolved;
+    try {
+      const tone = localStorage.getItem("flownotes:tone");
+      if (["neutral", "blue", "pink", "red", "yellow", "cyan"].includes(tone)) {
+        root.dataset.tone = tone;
+      }
+    } catch (error) {
+      /* Same as above; the neutral scheme is the default anyway. */
+    }
+  })();
+</script>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/vendor/app.css">
 </head>
