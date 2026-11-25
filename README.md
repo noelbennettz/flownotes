@@ -13,8 +13,8 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
   is isolated by owner. Administrators create, disable and delete accounts, and reset passwords.
 - **Editor.** Tiptap with Markdown round-tripping: headings, lists, task lists, code blocks,
   quotes, dividers, bold/italic/strikethrough/inline code, images. `/` opens the command menu,
-  `# ` / `- ` / `1. ` / `> ` / ```` ``` ```` followed by a space, and `---` convert as you type, pasted screenshots are
-  uploaded automatically, and edits autosave 600 ms after the last keystroke.
+  `# ` / `- ` / `1. ` / `> ` / `---` and a fence (` ``` ` + space) convert as you type; pasted
+  screenshots are uploaded automatically, and edits autosave 600 ms after the last keystroke.
 - **Search.** SQLite FTS5 with highlighted excerpts, plus a substring fallback for CJK queries.
 - **Interface.** Material 3 in seven languages (English, Traditional and Simplified Chinese,
   Arabic with full RTL, French, Russian, Spanish), light/dark/system themes and six accent tones.

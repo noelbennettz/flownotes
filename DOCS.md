@@ -77,10 +77,10 @@ data/
 └── trash/<account>-<stamp>/   # notes/uploads moved here when an account is deleted
 ```
 
-Notes and image folders are created with mode `0700`; `index.db` (which contains note text
-and must stay as private as the notes) and `.session-secret` are `0600`. Backups can be as simple as copying
-`data/` while the service is stopped, or `rsync` of `data/notes/` at any time — the `.md`
-files are always complete because writes go through a temporary file and `os.replace`.
+Notes and image folders are created with mode `0700`. `index.db` (which stores note text) and
+`.session-secret` are `0600`, so other local users cannot read them either. Backups can be as
+simple as copying `data/` while the service is stopped, or `rsync` of `data/notes/` at any time —
+the `.md` files are always complete because writes go through a temporary file and `os.replace`.
 
 ## How the index works
 
@@ -104,10 +104,9 @@ files are always complete because writes go through a temporary file and `os.rep
 - Tiptap 2 with `tiptap-markdown`; content is stored as Markdown, not HTML. Headings 1–6,
   bullet/ordered/task lists, code blocks, blockquotes, horizontal rules, bold, italic,
   strikethrough, inline code and images round-trip.
-- Input rules convert `# `, `- `, `1. `, `> `, `---` and ```` ``` ```` followed by a space as
-  you type. `/` opens the
-  command menu (also reachable with the keyboard: arrows, Enter, Esc); `/image` opens a file
-  picker and uploads the picture.
+- Input rules convert `# `, `- `, `1. `, `> `, `---` and a fence (` ``` ` + space) as you type.
+  `/` opens the command menu (arrows, Enter, Esc also work); `/image` opens a file picker and
+  uploads the picture.
 - Pasting an image uploads it to `data/uploads/<account>/` and inserts
   `![](/uploads/<account>/<file>)`.
 - Autosave runs 600 ms after the last keystroke; switching notes flushes first, and
@@ -130,8 +129,7 @@ actions are always visible and rows grow to 44 px, whatever the window width.
 ## API
 
 All `/api/*` routes except `/api/login`, `/api/logout` and `/api/setup*` require the session
-cookie. Payloads
-are JSON; errors are `{"detail": "…"}` with a matching status code.
+cookie. Payloads are JSON; errors are `{"detail": "…"}` with a matching status code.
 
 | Method | Path | Body / query | Notes |
 | --- | --- | --- | --- |
