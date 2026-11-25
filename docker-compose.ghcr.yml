@@ -1,6 +1,6 @@
 # Run the image published by GitHub Actions instead of building it here.
 #   docker compose -f docker-compose.ghcr.yml up -d
-# The GHCR package is private by default: `docker login ghcr.io` first.
+# The package is public: `docker pull` needs no login.
 services:
   flownotes:
     image: ghcr.io/noelbennettz/flownotes:latest
