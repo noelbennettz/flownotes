@@ -71,6 +71,12 @@ successful call — afterwards it returns `409`.
 Accounts are created from **Settings → Users**. Names are lowercase letters, digits, `.`, `_`
 and `-`, 2–32 characters, and they double as the folder name, so they cannot be renamed later.
 
+A new account gets one seed note on its first sign-in, written in the language the sign-in page
+was showing: `Welcome.md`, `歡迎使用.md`, `欢迎使用.md`, `مرحبا.md`, `Bienvenue.md`,
+`Добро-пожаловать.md` or `Bienvenido.md`. If the request carries no language the browser's
+`Accept-Language` decides, and anything unrecognised falls back to English. The note is an
+ordinary file afterwards — rename it or delete it.
+
 ## Data layout
 
 ```
@@ -139,8 +145,8 @@ cookie. Payloads are JSON; errors are `{"detail": "…"}` with a matching status
 | Method | Path | Body / query | Notes |
 | --- | --- | --- | --- |
 | GET | `/api/setup/status` | — | `{needs_setup, requires_token}` |
-| POST | `/api/setup` | `{username, password, token}` | Creates the first administrator; succeeds once |
-| POST | `/api/login` | `{username, password}` | Sets the cookie; 10 failures per IP+account per 5 min → `429` |
+| POST | `/api/setup` | `{username, password, token, lang}` | Creates the first administrator; succeeds once |
+| POST | `/api/login` | `{username, password, lang}` | Sets the cookie; 10 failures per IP+account per 5 min → `429` |
 | POST | `/api/logout` | — | Clears the cookie |
 | GET | `/api/me` | — | Current account |
 | POST | `/api/me/password` | `{current_password, new_password}` | Bumps `token_version`, re-issues the cookie |
@@ -186,6 +192,9 @@ docker compose up -d --build
 
 The index migrates itself; accounts and notes live in `./data` and are untouched. Back up
 `data/` first if the release notes mention a schema change.
+
+Static assets answer `Cache-Control: no-cache` with an ETag, so an open tab picks up a new
+`app.css` or bundle on the next reload instead of running the previous one from its cache.
 
 ### Delete an account
 

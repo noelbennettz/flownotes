@@ -20,6 +20,19 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
   Arabic with full RTL, French, Russian, Spanish), light/dark/system themes and six accent tones.
 - **No default account.** The first visit is a setup wizard; an optional token keeps strangers
   from claiming the instance.
+- **First note.** A new account starts with a welcome note in the language of the first sign-in
+  (English, Chinese, Arabic, French, Russian or Spanish), so nothing opens in a language the
+  person may not read.
+
+## Screenshots
+
+| Editor, light theme | Editor, dark theme |
+| --- | --- |
+| ![Editor with the sidebar open, light theme](docs/screenshots/main-light.png) | ![The same note in the dark theme](docs/screenshots/main-dark.png) |
+
+| Settings | Phone-sized layout |
+| --- | --- |
+| ![Settings page: account, appearance, accent colour](docs/screenshots/settings-light.png) | ![Editor on a 390 px wide screen](docs/screenshots/mobile-light.png) |
 
 ## Requirements
 

@@ -1311,17 +1311,21 @@ kbd {
     top: 0;
     bottom: 0;
     inset-inline-start: 0;
-  inset-inline-end: auto;
+    inset-inline-end: auto;
     border-radius: 0 var(--shape-l) var(--shape-l) 0;
     box-shadow: var(--elev-2);
   }
 
-  .layout.is-collapsed .drawer { margin-left: calc(var(--drawer-width) * -1); }
+  .layout.is-collapsed .drawer { margin-inline-start: calc(var(--drawer-width) * -1); }
   .layout:not(.is-collapsed) .scrim { opacity: 1; pointer-events: auto; }
 
   .canvas__inner { padding: 24px 16px 140px; }
   .app-bar { padding: 0 8px; }
   .save-state { display: none; }
+}
+
+@media (min-width: 901px) {
+  #btn-close-drawer { display: none; }
 }
 
 @media (max-width: 520px) {
