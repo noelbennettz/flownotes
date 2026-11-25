@@ -37,9 +37,13 @@ instead of building it.
 
 ```bash
 docker pull ghcr.io/noelbennettz/flownotes:latest
-docker run -d --name flownotes -p 8000:8000 \
+docker run -d --name flownotes --user "$(id -u):$(id -g)" -p 8000:8000 \
   -v "$PWD/data:/app/data" ghcr.io/noelbennettz/flownotes:latest
 ```
+
+`--user` mirrors what the Compose file does: the container writes `./data` as you, so the
+Markdown files stay editable. Omit it only if you accept root-owned files, or set it to `0:0`
+on rootless Docker (see [Troubleshooting](#troubleshooting)).
 
 The package is private by default, so pulling needs `docker login ghcr.io` with a token that
 can read packages.
