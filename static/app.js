@@ -83,6 +83,9 @@ const state = {
   searchResults: [],
   searchIndex: -1,
   pendingMarkdown: null,
+  // Text sent by the hidden-tab keepalive flush; its response is unreadable, so the outcome
+  // is confirmed by comparing the stored note when the tab becomes visible again.
+  pendingWrite: null,
   expanded: new Set(),
 };
 
@@ -180,12 +183,28 @@ function scheduleSave() {
 async function flushSave() {
   window.clearTimeout(state.saveTimer);
   state.saveTimer = null;
-  if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return true;
+  if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) {
+    state.pendingWrite = null;
+    return true;
+  }
   // A conflict is waiting on the user; do not overwrite the other device's text.
   if (state.conflict) return false;
 
   const path = state.currentPath;
+  if (state.pendingWrite?.path === path) {
+    // A keepalive flush may already have stored the text it sent; its response was unreadable.
+    // Confirm that write first so this save quotes the right version.
+    const pending = state.pendingWrite;
+    const confirmed = await confirmPendingWrite(path);
+    if (state.currentPath !== path || state.conflict) return false;
+    if (confirmed && state.pendingMarkdown === pending.content) {
+      state.dirty = false;
+      setStatus("saved");
+      return true;
+    }
+  }
   const content = state.pendingMarkdown;
+  if (content === null) return true;
   setStatus("saving");
   try {
     const data = await apiJson("/api/note", {
@@ -242,6 +261,7 @@ async function reloadFromServer() {
     const view = await ensureEditor();
     state.version = data.version ?? null;
     state.pendingMarkdown = null;
+    state.pendingWrite = null;
     state.dirty = false;
     state.conflict = false;
     view.setMarkdown(data.content || "");
@@ -263,6 +283,7 @@ async function overwriteWithMine() {
     // No base_version: an explicit "keep my text".
     const data = await apiJson("/api/note", { method: "PUT", body: { path, content } });
     state.version = data.version ?? null;
+    state.pendingWrite = null;
     state.dirty = false;
     state.conflict = false;
     setStatus("saved");
@@ -276,12 +297,45 @@ async function overwriteWithMine() {
 /** Coming back to the tab: pick up edits saved elsewhere while this note was idle. */
 let lastMetaCheck = 0;
 
+/**
+ * The response of the keepalive PUT sent while the tab was hidden cannot be read, so its
+ * outcome is unknown. If the stored note already holds that exact text the write was ours:
+ * adopt the server's version silently instead of reporting another device's edit. Returns
+ * true when the content is confirmed on the server.
+ */
+async function confirmPendingWrite(path) {
+  const pending = state.pendingWrite;
+  if (!pending || pending.path !== path) return false;
+  state.pendingWrite = null;
+  try {
+    const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
+    if (data.content !== pending.content) return false;
+    state.version = data.version ?? null;
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 async function syncOpenNote() {
   if (document.visibilityState !== "visible") return;
-  if (!state.currentPath || state.dirty || state.conflict) return;
+  const path = state.currentPath;
+  if (!path || state.conflict) return;
+
+  // A pending keepalive write is the likely reason the version looks stale; settle it (or
+  // save newer text on top) before treating any difference as an edit from another device.
+  if (state.pendingWrite) {
+    if (state.pendingWrite.path !== path) {
+      state.pendingWrite = null;
+    } else {
+      await flushSave();
+      if (state.currentPath !== path || state.dirty || state.conflict) return;
+    }
+  }
+
+  if (state.dirty) return;
   if (Date.now() - lastMetaCheck < 3000) return;
   lastMetaCheck = Date.now();
-  const path = state.currentPath;
   try {
     const meta = await apiJson(`/api/note/meta?path=${encodeURIComponent(path)}`);
     if (state.currentPath !== path || state.dirty || state.conflict) return;
@@ -313,18 +367,22 @@ async function syncOpenNote() {
 function flushOnLeave() {
   if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return;
   if (state.conflict) return;
+  const path = state.currentPath;
+  const content = state.pendingMarkdown;
+  if (state.pendingWrite?.path === path && state.pendingWrite.content === content) return;
+  // The response cannot be read while the page is going away, so remember what was sent and
+  // stay dirty: syncOpenNote() confirms the write when the tab is shown again. Marking the
+  // note clean here would also lose the text if the keepalive request never arrived.
+  state.pendingWrite = { path, content };
+  window.clearTimeout(state.saveTimer);
+  state.saveTimer = null;
   try {
     fetch("/api/note", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: state.currentPath,
-        content: state.pendingMarkdown,
-        base_version: state.version,
-      }),
+      body: JSON.stringify({ path, content, base_version: state.version }),
       keepalive: true,
     }).catch(() => {});
-    state.dirty = false;
   } catch (error) {
     /* Nothing else we can do while unloading. */
   }
@@ -469,6 +527,7 @@ function resetEditorView() {
   state.dirty = false;
   state.conflict = false;
   state.pendingMarkdown = null;
+  state.pendingWrite = null;
   // The editor only exists once a note has been opened; never load it just to clear it.
   if (editor) editor.setMarkdown("");
   els.canvas.classList.remove("has-note");
@@ -497,6 +556,7 @@ async function openNote(path) {
     state.dirty = false;
     state.conflict = false;
     state.pendingMarkdown = null;
+    state.pendingWrite = null;
     view.setMarkdown(data.content || "");
     els.canvas.classList.add("has-note");
     expandAncestors(path);
