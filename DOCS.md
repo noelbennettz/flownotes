@@ -26,8 +26,11 @@ mkdir -p data
 docker compose up -d --build
 ```
 
-The shipped `docker-compose.yml` mounts `./data`, maps `8000:8000`, runs as
-`FLOWNOTES_UID:FLOWNOTES_GID` (default `1000:1000`) and sets `restart: unless-stopped`.
+The shipped `docker-compose.yml` mounts `./data`, maps `8000:8000`, and sets
+`FLOWNOTES_UID:FLOWNOTES_GID` (default `1000:1000`) plus `restart: unless-stopped`. The container's
+entrypoint starts as root, hands `./data` to that uid/gid, and drops to it before uvicorn runs, so
+the directory stays writable and the Markdown files stay editable even when Docker created the
+mount root as root. Do not add `user:` to the service: that skips the chown.
 
 Two variants are included: [docker-compose.example.yml](docker-compose.example.yml) documents
 every knob, and [docker-compose.ghcr.yml](docker-compose.ghcr.yml) pulls the published image
@@ -37,13 +40,15 @@ instead of building it.
 
 ```bash
 docker pull ghcr.io/noelbennettz/flownotes:latest
-docker run -d --name flownotes --user "$(id -u):$(id -g)" -p 8000:8000 \
-  -v "$PWD/data:/app/data" ghcr.io/noelbennettz/flownotes:latest
+docker run -d --name flownotes -e FLOWNOTES_UID="$(id -u)" -e FLOWNOTES_GID="$(id -g)" \
+  -p 8000:8000 -v "$PWD/data:/app/data" ghcr.io/noelbennettz/flownotes:latest
 ```
 
-`--user` mirrors what the Compose file does: the container writes `./data` as you, so the
-Markdown files stay editable. Omit it only if you accept root-owned files, or set it to `0:0`
-on rootless Docker (see [Troubleshooting](#troubleshooting)).
+The entrypoint chowns `./data` to `FLOWNOTES_UID`/`FLOWNOTES_GID` and then runs as that user, so
+the Markdown files belong to you. Omit the variables to get `1000:1000`, or set both to `0` on
+rootless Docker (see [Troubleshooting](#troubleshooting)). Passing `--user` also works but
+disables the chown, which is the old behaviour and only keeps working if `./data` is already
+writable by that uid.
 
 The package is public and anonymous pulls work, so `docker login ghcr.io` is not required. The
 images are multi-architecture (`linux/amd64` and `linux/arm64`) and tagged `latest`, `master` and
@@ -271,7 +276,7 @@ either, and a browser that learned HSTS for the bare IP would lock you out of pl
 
 | Symptom | Likely cause |
 | --- | --- |
-| The container restarts with `Permission denied: '/app/data/notes'` | `./data` is not writable by the container user. On rootless Docker set `FLOWNOTES_UID=0`/`FLOWNOTES_GID=0` in `.env`, or `chmod 777 data`. |
+| The container restarts with `Permission denied: '/app/data/notes'` | The entrypoint could not take ownership. It only chowns when the process starts as root, so remove `user:` from the compose service (or `--user` from `docker run`) and let `FLOWNOTES_UID`/`FLOWNOTES_GID` do the work. If the mount itself refuses `chown` (NFS root squash, read-only bind), fix it on the host: `sudo chown -R 1000:1000 data` or `chmod 777 data`. On rootless Docker set `FLOWNOTES_UID=0`/`FLOWNOTES_GID=0` in `.env`. |
 | `429` on login | The rate limit for that IP and account is full; wait five minutes. Restarting the service clears it. |
 | A note edited over SSH does not appear in search | Wait two seconds and refresh the tree, or run `POST /api/resync`. |
 | Searching a Chinese word finds nothing | FTS tokenises whole CJK runs; the LIKE fallback runs only when FTS returns zero rows. Try a shorter prefix. |

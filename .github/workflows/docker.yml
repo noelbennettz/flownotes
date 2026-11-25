@@ -129,10 +129,13 @@ jobs:
 
       - name: Start the container
         run: |
-          mkdir -p data
-          # Run as the runner uid so the 0700 note directories stay readable by
-          # the assertions below (and it matches docker-compose's user: setting).
-          docker run -d --name flownotes-ci --user "$(id -u):$(id -g)" \
+          # Create the mount root as root, like a fresh Docker bind mount or mkdir(1)
+          # on a server would. The entrypoint has to chown it to FLOWNOTES_UID/GID
+          # and drop privileges, or the assertions below never get a working app.
+          sudo mkdir -p data
+          # No --user here: that would bypass the ownership bootstrap under test.
+          docker run -d --name flownotes-ci \
+            -e FLOWNOTES_UID="$(id -u)" -e FLOWNOTES_GID="$(id -g)" \
             -p 127.0.0.1:8000:8000 -v "$PWD/data:/app/data" flownotes:ci
 
       - name: Wait for the setup endpoint

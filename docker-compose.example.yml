@@ -21,12 +21,16 @@ services:
       FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
       # Data directory inside the container; matches the volume below.
       FLOWNOTES_DATA: /app/data
+      # Owner of ./data. The entrypoint starts as root, chowns the mount to this
+      # uid/gid and then runs uvicorn as that user, so a host directory that does
+      # not exist yet (Docker would create it as root) still ends up editable.
+      # Set 0:0 on rootless Docker (see DOCS.md); adding `user:` below bypasses
+      # the chown and reintroduces the old permission error.
+      FLOWNOTES_UID: "${FLOWNOTES_UID:-1000}"
+      FLOWNOTES_GID: "${FLOWNOTES_GID:-1000}"
     volumes:
       # Notes, uploads, the index, the trash and the session secret.
       - ./data:/app/data
-    # Write ./data as the host user so the Markdown files stay editable.
-    # Run `mkdir -p data` first. On rootless Docker use 0:0 (see DOCS.md).
-    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import socket;s=socket.create_connection(('127.0.0.1',8000),3);s.close()\""]

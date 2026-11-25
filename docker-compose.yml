@@ -12,11 +12,13 @@ services:
       FLOWNOTES_SETUP_TOKEN: "${FLOWNOTES_SETUP_TOKEN:-}"
       # When empty, a random key is generated and stored in data/.session-secret.
       FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
+      # The entrypoint chowns ./data to this uid/gid, then runs the app as it, so the
+      # mounted directory is writable even when Docker created it as root.
+      # Keep these matching the owner you want on the Markdown files.
+      FLOWNOTES_UID: "${FLOWNOTES_UID:-1000}"
+      FLOWNOTES_GID: "${FLOWNOTES_GID:-1000}"
     volumes:
       - ./data:/app/data
-    # Write ./data as the host user so notes are not owned by root.
-    # Run `mkdir -p data` before starting.
-    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import socket;s=socket.create_connection(('127.0.0.1',8000),3);s.close()\""]

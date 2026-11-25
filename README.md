@@ -70,10 +70,14 @@ FLOWNOTES_DATA="$PWD/data" uvicorn app.main:app --host 0.0.0.0 --port 8000
 The committed `static/vendor/editor.bundle.js` means Node is only needed when you change the
 editor dependencies.
 
-On rootless Docker the container uid maps to a subuid, so `./data` owned by you is not writable
-inside the container. Put `FLOWNOTES_UID=0` and `FLOWNOTES_GID=0` in a `.env` next to the
-compose file (uid 0 maps back to you), or `chmod 777 data`. [DOCS.md](DOCS.md#troubleshooting)
-has the details.
+The container starts its entrypoint as root only to chown `./data` to
+`FLOWNOTES_UID`/`FLOWNOTES_GID` (default `1000:1000`) and then runs uvicorn as that user, so
+`mkdir -p data` is optional and the notes never belong to root. Keep `user:` out of the Compose
+service — it would skip the chown and bring back the old permission error.
+
+On rootless Docker the container uid maps to a subuid, so the default `1000:1000` writes files
+your host account cannot read. Put `FLOWNOTES_UID=0` and `FLOWNOTES_GID=0` in a `.env` next to
+the compose file (uid 0 maps back to you). [DOCS.md](DOCS.md#troubleshooting) has the details.
 
 ## Data and backups
 

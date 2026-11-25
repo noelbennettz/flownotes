@@ -10,9 +10,11 @@ services:
     environment:
       FLOWNOTES_SETUP_TOKEN: "${FLOWNOTES_SETUP_TOKEN:-}"
       FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
+      # Ownership of ./data; the entrypoint chowns the mount and drops to this user.
+      FLOWNOTES_UID: "${FLOWNOTES_UID:-1000}"
+      FLOWNOTES_GID: "${FLOWNOTES_GID:-1000}"
     volumes:
       - ./data:/app/data
-    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
     restart: unless-stopped
     pull_policy: always
     healthcheck:

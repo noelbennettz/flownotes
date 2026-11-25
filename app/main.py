@@ -92,8 +92,9 @@ try:
 except OSError as exc:  # noqa: BLE001
     raise RuntimeError(
         f"Cannot create the data directory {file_ops.DATA_DIR}: {exc}. "
-        "Check that the mounted data/ is writable by the container user "
-        "(FLOWNOTES_UID/FLOWNOTES_GID in docker-compose)."
+        "The mounted data/ is not writable by the user this process runs as. "
+        "Start the container without `user:` so the entrypoint can chown it to "
+        "FLOWNOTES_UID/FLOWNOTES_GID, or fix the ownership on the host."
     ) from exc
 
 _serializer = URLSafeTimedSerializer(_load_secret_key(), salt="flownotes-session")

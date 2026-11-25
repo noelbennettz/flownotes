@@ -33,8 +33,13 @@ COPY --from=vendor /build/static/vendor/editor.bundle.js ./static/vendor/editor.
 
 RUN mkdir -p /app/data/notes /app/data/uploads
 
+COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8000
 
-# Runs as root by default; docker-compose's user: picks the real identity so new files
-# in ./data belong to the host user. PYTHONDONTWRITEBYTECODE keeps /app clean.
+# The entrypoint runs as root long enough to chown the data bind mount to
+# FLOWNOTES_UID/FLOWNOTES_GID and then drops to that user, so ./data belongs to the
+# host user whether or not the directory existed before the first start.
+# PYTHONDONTWRITEBYTECODE keeps /app clean.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
