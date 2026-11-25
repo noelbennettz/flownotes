@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 
-from . import database, file_ops, users
+from . import database, file_ops, users, welcome
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
@@ -58,36 +58,6 @@ FAIL_LIMIT = 10
 _failed_logins: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
 _last_sync: dict[str, float] = {}
-
-WELCOME_PATH = "Welcome.md"
-WELCOME_NOTE = """# Welcome to Flow Notes
-
-This note is a plain text file on the server, under `data/notes/<your account>/`, so you
-can open it with any other editor.
-
-## A few tricks
-
-- Type `/` on an empty line to open the command menu
-- `Ctrl + K` (or `Cmd + K`) opens full-text search
-- Paste a screenshot: the image is stored under `data/uploads/<your account>/`
-- The drawer creates notes and folders; Settings holds appearance, account and users
-
-## To-do
-
-- [x] Create the first note
-- [ ] Change the default password in Settings
-- [ ] Move some notes into folders
-
-## Code block
-
-```python
-from fastapi import FastAPI
-
-app = FastAPI()
-```
-
-> The files are the truth; the index can always be rebuilt.
-"""
 
 
 def _load_secret_key() -> str:
@@ -129,13 +99,28 @@ except OSError as exc:  # noqa: BLE001
 _serializer = URLSafeTimedSerializer(_load_secret_key(), salt="flownotes-session")
 
 
-def ensure_workspace(username: str) -> None:
-    """Make sure a user's notes folder exists; seed it with a welcome note when empty."""
+def ensure_user_dir(username: str) -> None:
+    """Create a user's notes folder if it is missing, without seeding anything."""
+    file_ops.user_root(username).mkdir(parents=True, exist_ok=True, mode=0o700)
+
+
+def ensure_workspace(username: str, locale: str | None = None) -> None:
+    """Make sure a user's notes folder exists; seed it with a welcome note when empty.
+
+    The seed note follows the language the person signed in with, so a new account does not
+    start in a language they may not read.
+    """
     root = file_ops.user_root(username)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not file_ops.list_note_paths(root):
-        path = file_ops.write_note(root, WELCOME_PATH, WELCOME_NOTE)
-        database.upsert_note_index(username, path, None, WELCOME_NOTE)
+        name, body = welcome.note_for(locale)
+        path = file_ops.write_note(root, name, body)
+        database.upsert_note_index(username, path, None, body)
+
+
+def _request_locale(explicit: str, request: Request) -> str:
+    """Prefer the language the page is showing, then the browser's Accept-Language header."""
+    return welcome.normalise_locale(explicit or request.headers.get("accept-language"))
 
 
 def migrate_legacy_into(username: str) -> int:
@@ -197,7 +182,7 @@ async def lifespan(_app: FastAPI):
         if target:
             migrate_legacy_into(target)
         for user in users.list_users():
-            ensure_workspace(user.username)
+            ensure_user_dir(user.username)
             database.sync_all_from_disk(user.username)
     yield
 
@@ -218,6 +203,10 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    # Static files keep their ETag, so revalidation is cheap; but they must be revalidated or
+    # an upgraded client would keep running the previous CSS/JS from its cache.
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
     # Make the browser enforce same-origin only: the last line of defence for offline use.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data: blob:; "
@@ -361,6 +350,8 @@ LOGIN_HTML = """<!DOCTYPE html>
         body: JSON.stringify({
           username: document.getElementById("username").value.trim(),
           password: document.getElementById("password").value,
+          // The seed note and any first-run text follow the language on screen.
+          lang: getLocale(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -481,6 +472,7 @@ SETUP_HTML = """<!DOCTYPE html>
           username: document.getElementById("username").value.trim(),
           password,
           token: document.getElementById("token").value,
+          lang: getLocale(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -522,10 +514,11 @@ class SetupPayload(BaseModel):
     username: str = ""
     password: str = ""
     token: str = ""
+    lang: str = ""
 
 
 @app.post("/api/setup")
-def api_setup(payload: SetupPayload):
+def api_setup(payload: SetupPayload, request: Request):
     """Create the first administrator. Runs once; afterwards every attempt is a 409."""
     if users.count_users() > 0:
         raise HTTPException(status_code=409, detail="Already initialized, please sign in")
@@ -539,7 +532,7 @@ def api_setup(payload: SetupPayload):
 
     # Move single-user data into this administrator's folder, then ensure the workspace.
     moved = migrate_legacy_into(created.username)
-    ensure_workspace(created.username)
+    ensure_workspace(created.username, _request_locale(payload.lang, request))
     database.sync_all_from_disk(created.username)
 
     response = JSONResponse({"ok": True, "user": created.as_dict(), "migrated": moved})
@@ -550,6 +543,7 @@ def api_setup(payload: SetupPayload):
 class LoginPayload(BaseModel):
     username: str = ""
     password: str = ""
+    lang: str = ""
 
 
 def _throttle_key(request: Request, username: str) -> tuple[str, str]:
@@ -586,7 +580,7 @@ def login(payload: LoginPayload, request: Request):
         raise HTTPException(status_code=401, detail="Wrong account or password")
 
     _failed_logins.pop(key, None)
-    ensure_workspace(user.username)
+    ensure_workspace(user.username, _request_locale(payload.lang, request))
     response = JSONResponse({"ok": True, "user": user.as_dict()})
     _issue_session(response, user)
     return response
@@ -670,7 +664,7 @@ def admin_list_users():
 def admin_create_user(payload: NewUserPayload):
     try:
         created = users.create_user(payload.username, payload.password, is_admin=payload.is_admin)
-        ensure_workspace(created.username)
+        ensure_user_dir(created.username)
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
     return {"ok": True, "user": created.as_dict()}
