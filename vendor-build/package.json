@@ -1,0 +1,23 @@
+{
+  "name": "flownotes-vendor-build",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "把 Tiptap 及其相依套件打包成單一本地 ES Module，執行時完全不碰 CDN",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "2.27.3",
+    "@tiptap/pm": "2.27.3",
+    "@tiptap/starter-kit": "2.27.3",
+    "@tiptap/extension-task-list": "2.27.3",
+    "@tiptap/extension-task-item": "2.27.3",
+    "@tiptap/extension-image": "2.27.3",
+    "@tiptap/extension-placeholder": "2.27.3",
+    "tiptap-markdown": "0.8.10"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

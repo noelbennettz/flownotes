@@ -1,0 +1,7 @@
+.git
+data
+vendor-build/node_modules
+**/__pycache__
+**/*.pyc
+.venv
+README.md

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Flow Notes</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/vendor/app.css" />
+  </head>
+  <body>
+    <div class="layout" id="layout">
+      <aside class="drawer" id="drawer" aria-label="Notes">
+        <div class="drawer__head">
+          <div class="brand">
+            <span class="brand__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  d="M5 7h14M5 12h14M5 17h8"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <span class="brand__name" data-i18n="app.name">Flow Notes</span>
+          </div>
+          <button
+            class="icon-btn"
+            id="btn-close-drawer"
+            type="button"
+            data-i18n-aria-label="common.close"
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div class="drawer__actions">
+          <button class="m3-btn m3-btn--filled" id="btn-new-note" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span data-i18n="sidebar.newNote">New note</span>
+          </button>
+          <button class="m3-btn m3-btn--tonal" id="btn-new-folder" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                d="M3 7a2 2 0 0 1 2-2h3.6l1.8 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span data-i18n="sidebar.newFolder">New folder</span>
+          </button>
+        </div>
+
+        <button class="search-bar" id="btn-search" type="button">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.4" fill="none" stroke="currentColor" stroke-width="1.8" />
+            <path d="M16 16l4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+          <span class="search-bar__text" data-i18n="sidebar.search">Search notes</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+
+        <nav class="tree" id="tree" aria-label="Notes">
+          <p class="tree__empty">…</p>
+        </nav>
+
+        <div class="drawer__foot">
+          <a class="nav-item" href="/settings">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7" />
+              <path
+                d="M12 3.6v2M12 18.4v2M3.6 12h2M18.4 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span data-i18n="sidebar.settings">Settings</span>
+          </a>
+          <div class="drawer__meta">
+            <span class="avatar" id="user-avatar" aria-hidden="true">·</span>
+            <span class="drawer__user" id="user-name">…</span>
+            <button
+              class="icon-btn"
+              id="btn-language"
+              type="button"
+              data-i18n-aria-label="sidebar.language"
+              aria-label="Language"
+              title="Language"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.7" />
+                <path
+                  d="M3.8 12h16.4M12 3.6c2.4 2.3 3.7 5.2 3.7 8.4S14.4 18.1 12 20.4C9.6 18.1 8.3 15.2 8.3 12S9.6 5.9 12 3.6z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
+              </svg>
+            </button>
+            <button
+              class="icon-btn"
+              id="btn-theme"
+              type="button"
+              data-i18n-aria-label="sidebar.theme"
+              aria-label="Toggle theme"
+              title="Toggle theme"
+            >
+              <svg class="icon-sun" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+                <path
+                  d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M18.5 5.5l-1.4 1.4M6.9 17.1l-1.4 1.4"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg class="icon-moon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path
+                  d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="scrim" id="drawer-scrim" aria-hidden="true"></div>
+
+      <main class="main">
+        <header class="app-bar">
+          <button
+            class="icon-btn"
+            id="btn-toggle-drawer"
+            type="button"
+            data-i18n-aria-label="sidebar.toggle"
+            aria-label="Toggle sidebar"
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path
+                d="M4 6.5h16M4 12h16M4 17.5h16"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <nav class="breadcrumb" id="breadcrumb" aria-label="Path"></nav>
+          <div class="app-bar__actions">
+            <span class="save-state" id="save-status" data-state="saved" role="status">Saved</span>
+            <button
+              class="icon-btn"
+              id="btn-export"
+              type="button"
+              data-i18n-title="settings.export"
+              data-i18n-aria-label="settings.export"
+              title="Export ZIP"
+              aria-label="Export ZIP"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path
+                  d="M12 3.5v10M8.2 9.7l3.8 3.8 3.8-3.8"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M4.5 15v3.2a1.3 1.3 0 0 0 1.3 1.3h12.4a1.3 1.3 0 0 0 1.3-1.3V15"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <section class="canvas" id="canvas">
+          <div class="canvas__inner">
+            <div class="editor" id="editor"></div>
+          </div>
+          <div class="empty-state" id="empty-state">
+            <span class="empty-state__icon" aria-hidden="true">
+              <svg viewBox="0 0 32 32" width="32" height="32">
+                <rect
+                  x="6"
+                  y="5"
+                  width="20"
+                  height="23"
+                  rx="2.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M10 11h12M10 16h12M10 21h7"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <h2 class="m3-title-large" id="empty-title" data-i18n="canvas.emptyTitle">Start writing</h2>
+            <p class="m3-body-medium" id="empty-body" data-i18n="canvas.emptyBody">
+              Pick a note on the left, or press + to create one.
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="dialog-scrim" id="search-dialog" hidden>
+      <div class="dialog dialog--search" role="dialog" aria-modal="true" aria-labelledby="search-title">
+        <h2 id="search-title" class="visually-hidden" data-i18n="search.title">Search notes</h2>
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.4" fill="none" stroke="currentColor" stroke-width="1.8" />
+            <path d="M16 16l4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+          <input
+            id="search-input"
+            type="search"
+            data-i18n-placeholder="search.placeholder"
+            placeholder="Search titles and text…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <kbd>Esc</kbd>
+        </div>
+        <div class="search-results" id="search-results">
+          <p class="dialog__hint" data-i18n="search.hint">Type to search. Enter opens the first result.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-scrim" id="input-dialog" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="input-title">
+        <h2 class="dialog__title" id="input-title">Confirm</h2>
+        <p class="dialog__body" id="input-body" hidden></p>
+        <label class="m3-field" for="input-field">
+          <span class="m3-field__label" id="input-label">Name</span>
+          <input id="input-field" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="m3-field__helper" id="input-helper"></p>
+        <div class="dialog__actions">
+          <button class="m3-btn m3-btn--text" id="input-cancel" type="button">Cancel</button>
+          <button class="m3-btn m3-btn--filled" id="input-confirm" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-scrim" id="rename-dialog" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+        <h2 class="dialog__title" id="rename-title">Rename</h2>
+        <p class="dialog__body" id="rename-body"></p>
+        <label class="m3-field" for="rename-name">
+          <span class="m3-field__label" id="rename-name-label">Name</span>
+          <input id="rename-name" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="rename-folder">
+          <span class="m3-body-medium" id="rename-folder-label">Folder</span>
+          <select id="rename-folder" class="m3-select"></select>
+        </div>
+        <div class="dialog__actions">
+          <button class="m3-btn m3-btn--text" id="rename-cancel" type="button">Cancel</button>
+          <button class="m3-btn m3-btn--filled" id="rename-confirm" type="button">Rename</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-scrim" id="confirm-dialog" hidden>
+      <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 class="dialog__title" id="confirm-title">Confirm</h2>
+        <p class="dialog__body" id="confirm-body"></p>
+        <div class="dialog__actions">
+          <button class="m3-btn m3-btn--text" id="confirm-cancel" type="button">Cancel</button>
+          <button class="m3-btn m3-btn--filled" id="confirm-ok" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="snackbar" id="snackbar" role="status" hidden></div>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

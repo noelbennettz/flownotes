@@ -1,0 +1,192 @@
+name: Docker image
+
+# Builds the image on every push to the default branch (and for v* tags, PRs and
+# manual runs), publishes it to GHCR, then boots it once to run an end-to-end
+# smoke test. Old runs are pruned in the same workflow so the Actions tab and
+# the artifact quota stay small without a cron job.
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  actions: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compute image name
+        id: image
+        # GHCR requires a lowercase path; repository names may contain capitals.
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Keep only the newest three runs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prune-runs.sh 3
+
+      # QEMU is only needed for the arm64 half of a published multi-arch image.
+      # A pull request builds the runner's own architecture, which is enough to
+      # prove the Dockerfile still works.
+      - name: Set up QEMU
+        if: github.event_name != 'pull_request'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Flow Notes
+            org.opencontainers.image.description=Self-hosted, offline-first Markdown notes
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          # Set the repository variable DOCKER_PLATFORMS to linux/amd64 to skip
+          # the arm64 build.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || vars.DOCKER_PLATFORMS || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Actually boot the image and exercise setup/login/notes/search, so a broken
+  # Dockerfile or a missing dependency fails the run instead of the user's server.
+  smoke:
+    name: Smoke test
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the amd64 image for local testing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: flownotes:ci
+          cache-from: type=gha
+
+      - name: Start the container
+        run: |
+          mkdir -p data
+          # Run as the runner uid so the 0700 note directories stay readable by
+          # the assertions below (and it matches docker-compose's user: setting).
+          docker run -d --name flownotes-ci --user "$(id -u):$(id -g)" \
+            -p 127.0.0.1:8000:8000 -v "$PWD/data:/app/data" flownotes:ci
+
+      - name: Wait for the setup endpoint
+        run: |
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/setup/status || true)
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "container did not become ready"
+          docker logs flownotes-ci
+          exit 1
+
+      - name: Create the first administrator
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"username":"ci","password":"cipassword1"}' \
+            http://127.0.0.1:8000/api/setup
+
+      - name: Log in, write a note and search for it
+        run: |
+          curl -fsS -c cookies.txt -H 'Content-Type: application/json' \
+            -d '{"username":"ci","password":"cipassword1"}' \
+            http://127.0.0.1:8000/api/login > /dev/null
+          curl -fsS -b cookies.txt -H 'Content-Type: application/json' \
+            -d '{"path":"hello","content":"# hello world\n"}' \
+            http://127.0.0.1:8000/api/note > /dev/null
+          curl -fsS -b cookies.txt 'http://127.0.0.1:8000/api/search?q=hello' > result.json
+          cat result.json
+          grep -q '"path":"hello.md"' result.json
+          test -f data/notes/ci/hello.md
+          test -f data/index.db
+
+      - name: Stop the container
+        if: always()
+        run: |
+          docker logs flownotes-ci || true
+          docker rm -f flownotes-ci || true
+
+  # Housekeeping: keep the Actions tab small; the image lives in GHCR.
+  prune:
+    name: Prune old runs
+    needs: [build, smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Delete every run but the three newest
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prune-runs.sh 3

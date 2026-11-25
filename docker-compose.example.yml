@@ -1,0 +1,36 @@
+# Reference compose file: every knob Flow Notes understands, commented in place.
+# Copy to docker-compose.yml (or pass it with -f) and adjust to your host.
+services:
+  flownotes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Published image instead of a local build:
+    # image: ghcr.io/noelbennettz/flownotes:latest
+    image: flownotes:latest
+    container_name: flownotes
+    ports:
+      # host:container — bind to 127.0.0.1:8000 when a reverse proxy is in front.
+      - "8000:8000"
+    environment:
+      # Value /setup demands before it creates the first administrator.
+      # Set it before the port is reachable by anyone else.
+      FLOWNOTES_SETUP_TOKEN: "${FLOWNOTES_SETUP_TOKEN:-}"
+      # Cookie signing key. Empty: a random key is written to
+      # data/.session-secret (mode 0600) on first start.
+      FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
+      # Data directory inside the container; matches the volume below.
+      FLOWNOTES_DATA: /app/data
+    volumes:
+      # Notes, uploads, the index, the trash and the session secret.
+      - ./data:/app/data
+    # Write ./data as the host user so the Markdown files stay editable.
+    # Run `mkdir -p data` first. On rootless Docker use 0:0 (see DOCS.md).
+    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket;s=socket.create_connection(('127.0.0.1',8000),3);s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

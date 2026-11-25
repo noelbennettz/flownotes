@@ -1,0 +1,23 @@
+# Run the image published by GitHub Actions instead of building it here.
+#   docker compose -f docker-compose.ghcr.yml up -d
+# The GHCR package is private by default: `docker login ghcr.io` first.
+services:
+  flownotes:
+    image: ghcr.io/noelbennettz/flownotes:latest
+    container_name: flownotes
+    ports:
+      - "8000:8000"
+    environment:
+      FLOWNOTES_SETUP_TOKEN: "${FLOWNOTES_SETUP_TOKEN:-}"
+      FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
+    volumes:
+      - ./data:/app/data
+    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
+    restart: unless-stopped
+    pull_policy: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket;s=socket.create_connection(('127.0.0.1',8000),3);s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

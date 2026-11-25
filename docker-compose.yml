@@ -1,0 +1,26 @@
+services:
+  flownotes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flownotes:latest
+    container_name: flownotes
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional: when set, /setup requires this token to create the first administrator.
+      FLOWNOTES_SETUP_TOKEN: "${FLOWNOTES_SETUP_TOKEN:-}"
+      # When empty, a random key is generated and stored in data/.session-secret.
+      FLOWNOTES_SECRET_KEY: "${FLOWNOTES_SECRET_KEY:-}"
+    volumes:
+      - ./data:/app/data
+    # Write ./data as the host user so notes are not owned by root.
+    # Run `mkdir -p data` before starting.
+    user: "${FLOWNOTES_UID:-1000}:${FLOWNOTES_GID:-1000}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket;s=socket.create_connection(('127.0.0.1',8000),3);s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
