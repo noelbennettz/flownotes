@@ -47,7 +47,8 @@ docker compose up -d --build
 ```
 
 Open `http://<host>:8000`. The first page is `/setup`; create the administrator there, then add
-other accounts from **Settings → Users**.
+other accounts from **Settings → Users**. The service speaks plain HTTP; if you need HTTPS,
+[DOCS.md](DOCS.md#tls-and-reverse-proxies) has a Caddy and an nginx example.
 
 Prefer the published image:
 
@@ -134,7 +135,7 @@ and the upload allow-list.
 
 | File | Contents |
 | --- | --- |
-| [DOCS.md](DOCS.md) | Installation detail, data layout, index internals, the API reference, operations, troubleshooting, development. |
+| [DOCS.md](DOCS.md) | Installation detail, data layout, index internals, the API reference, operations, TLS and reverse proxies, troubleshooting, development. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Repository layout, how to build and run the checks, house rules, commit style. |
 | [SECURITY.md](SECURITY.md) | Supported versions, how to report, scope. |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licence of every Python package in the image and every library inside the editor bundle. |

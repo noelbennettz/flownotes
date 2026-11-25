@@ -225,6 +225,48 @@ new host with the same `FLOWNOTES_DATA` contents. Nothing else is stored outside
 - The setup wizard creates the first administrator without authentication, which is why
   `FLOWNOTES_SETUP_TOKEN` exists. Set it before exposing the port.
 
+## TLS and reverse proxies
+
+Flow Notes serves plain HTTP: uvicorn listens on port 8000 and the image carries no TLS
+certificate, no ACME client and no HSTS header. That is deliberate — the session cookie is
+`HttpOnly` and `SameSite=Lax` but not `Secure`, so `http://192.168.1.10:8000` can sign in. Keep the
+port on the LAN, or terminate TLS in front and leave the app as it is. Nothing in the app depends
+on the scheme: there are no absolute URLs, no WebSocket upgrade and no redirect to https.
+
+Bind the published port to loopback so only the proxy can reach it:
+
+```yaml
+ports:
+  - "127.0.0.1:8000:8000"
+```
+
+Caddy obtains and renews the certificate by itself:
+
+```
+notes.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+nginx with a certificate from anywhere else — the body size matters because uploads are capped at
+20 MB, and the `Host` header is the only proxy header the app reads:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name notes.example.com;
+    client_max_body_size 21m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+If you want HSTS or a redirect from http to https, add it at the proxy; the app does not send
+either, and a browser that learned HSTS for the bare IP would lock you out of plain-HTTP access.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
