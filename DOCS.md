@@ -75,6 +75,10 @@ successful call — afterwards it returns `409`.
 
 Accounts are created from **Settings → Users**. Names are lowercase letters, digits, `.`, `_`
 and `-`, 2–32 characters, and they double as the folder name, so they cannot be renamed later.
+The last active administrator cannot be demoted, disabled or deleted, and nobody can disable or
+delete their own account; those buttons are disabled in the UI (with the reason as the tooltip)
+and the API returns `400` for the same operations. A single-account instance therefore keeps its
+only administrator intact while still allowing new accounts to be added.
 
 A new account gets one seed note on its first sign-in, written in the language the sign-in page
 was showing: `Welcome.md`, `歡迎使用.md`, `欢迎使用.md`, `مرحبا.md`, `Bienvenue.md`,
@@ -270,7 +274,7 @@ notes.example.com {
 ```
 
 nginx with a certificate from anywhere else — the body size matters because uploads are capped at
-20 MB, and the `Host` header is the only proxy header the app reads:
+20 MB, and `X-Forwarded-For` is what lets the login throttle see the real client (see below):
 
 ```nginx
 server {
@@ -281,9 +285,23 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 ```
+
+### Trusted proxies and client addresses
+
+Failed sign-ins are counted per client address (10 per account, 30 per address in five minutes).
+Behind a reverse proxy the app would only ever see the proxy's address, so tell it which peers may
+be believed: set `FLOWNOTES_TRUSTED_PROXIES` to a comma-separated list of IPs or CIDRs. Only when
+the direct peer matches that list does the app read the first `X-Forwarded-For` entry; otherwise
+the header is ignored, so a client reaching uvicorn directly cannot spoof its address to dodge the
+limit. Caddy sets `X-Forwarded-For` itself; nginx needs the line above.
+
+In Docker the proxy reaches the container from the bridge gateway (commonly `172.17.0.1` for the
+default bridge, `172.18.0.1` for a compose network), not from `127.0.0.1` — check with
+`docker network inspect <network>`. Leave the variable empty when the port is published directly.
 
 If you want HSTS or a redirect from http to https, add it at the proxy; the app does not send
 either, and a browser that learned HSTS for the bare IP would lock you out of plain-HTTP access.

@@ -151,22 +151,33 @@ async function loadUsers() {
   renderUsers(usersCache);
 }
 
-function actionButton(icon, label, handler) {
+function actionButton(icon, label, handler, { disabled = false, reason = "" } = {}) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "icon-btn";
-  button.title = label;
-  button.setAttribute("aria-label", label);
   button.innerHTML = icon;
+  button.title = disabled ? reason : label;
+  button.setAttribute("aria-label", disabled ? `${label} — ${reason}` : label);
+  if (disabled) {
+    // The server refuses this too; showing it disabled explains why instead of failing later.
+    button.disabled = true;
+    button.setAttribute("aria-disabled", "true");
+    return button;
+  }
   button.addEventListener("click", () => void handler());
   return button;
 }
 
 function renderUsers(users) {
   els.userList.textContent = "";
+  const activeAdmins = users.filter((user) => user.is_admin && !user.disabled).length;
   users.forEach((user) => {
     const row = document.createElement("div");
     row.className = "user-row";
+    const isSelf = user.username === me?.username;
+    const lastAdmin = user.is_admin && activeAdmins <= 1;
+    const selfReason = t("settings.blocked.self");
+    const lastAdminReason = t("settings.blocked.lastAdmin");
 
     const avatar = document.createElement("span");
     avatar.className = "avatar";
@@ -176,7 +187,7 @@ function renderUsers(users) {
     text.className = "user-row__text";
     const name = document.createElement("p");
     name.className = "user-row__name";
-    name.textContent = user.username + (user.username === me?.username ? ` ${t("settings.you")}` : "");
+    name.textContent = user.username + (isSelf ? ` ${t("settings.you")}` : "");
     const meta = document.createElement("p");
     meta.className = "user-row__meta";
     meta.textContent = [
@@ -193,13 +204,21 @@ function renderUsers(users) {
         ICONS.shield,
         user.is_admin ? t("settings.action.demote") : t("settings.action.promote"),
         () => toggleAdmin(user),
+        { disabled: lastAdmin, reason: lastAdminReason },
       ),
       actionButton(
         user.disabled ? ICONS.play : ICONS.pause,
         user.disabled ? t("settings.action.enable") : t("settings.action.disable"),
         () => toggleDisabled(user),
+        {
+          disabled: !user.disabled && (isSelf || lastAdmin),
+          reason: isSelf ? selfReason : lastAdminReason,
+        },
       ),
-      actionButton(ICONS.trash, t("settings.action.delete"), () => removeUser(user)),
+      actionButton(ICONS.trash, t("settings.action.delete"), () => removeUser(user), {
+        disabled: isSelf || lastAdmin,
+        reason: isSelf ? selfReason : lastAdminReason,
+      }),
     );
 
     row.append(avatar, text, actions);

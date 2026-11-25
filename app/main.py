@@ -7,6 +7,7 @@ SQLite is only a rebuildable index.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import secrets
 import shutil
@@ -52,6 +53,23 @@ IMAGE_EXTENSIONS = {
     "image/webp": ".webp",
     "image/avif": ".avif",
 }
+
+
+def _load_trusted_proxies() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    """Addresses whose X-Forwarded-For header is believed (the reverse proxy in front)."""
+    networks = []
+    for item in os.environ.get("FLOWNOTES_TRUSTED_PROXIES", "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+TRUSTED_PROXIES = _load_trusted_proxies()
 
 FAIL_WINDOW = 300
 FAIL_LIMIT = 10  # failed sign-ins per (address, account) inside the window
@@ -608,9 +626,33 @@ class LoginPayload(BaseModel):
     lang: str = ""
 
 
+def _client_host(request: Request) -> str:
+    """Client address used for throttling.
+
+    ``X-Forwarded-For`` is only honoured when the direct peer is listed in
+    FLOWNOTES_TRUSTED_PROXIES; otherwise a public client could spoof its address and dodge the
+    per-address limit. The header's first entry is the original client.
+    """
+    peer = request.client.host if request.client else ""
+    if not peer:
+        return "unknown"
+    if not TRUSTED_PROXIES:
+        return peer
+    try:
+        peer_address = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer
+    if not any(peer_address in network for network in TRUSTED_PROXIES):
+        return peer
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(forwarded))
+    except ValueError:
+        return peer
+
+
 def _throttle_key(request: Request, username: str) -> tuple[str, str]:
-    host = request.client.host if request.client else "unknown"
-    return (host, username.strip().lower())
+    return (_client_host(request), username.strip().lower())
 
 
 def _prune_bucket(bucket: deque[float], now: float) -> None:

@@ -28,6 +28,10 @@ services:
       # the chown and reintroduces the old permission error.
       FLOWNOTES_UID: "${FLOWNOTES_UID:-1000}"
       FLOWNOTES_GID: "${FLOWNOTES_GID:-1000}"
+      # Only when a reverse proxy sits in front: the proxy's address (IP or CIDR) as seen by
+      # this container, so login throttling reads X-Forwarded-For instead of the proxy's IP.
+      # Leave empty when the port is published directly; see DOCS.md.
+      FLOWNOTES_TRUSTED_PROXIES: "${FLOWNOTES_TRUSTED_PROXIES:-}"
     volumes:
       # Notes, uploads, the index, the trash and the session secret.
       - ./data:/app/data
