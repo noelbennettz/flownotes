@@ -14,13 +14,12 @@ import shutil
 import sqlite3
 import tempfile
 import time
-import zipfile
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-import aiofiles
+from anyio import open_file, to_thread
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
@@ -39,12 +38,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
+# Sync endpoints run in anyio's worker threads. The default limit is 40, and every scrypt
+# verification inside one of them needs ~16 MiB, so a burst of sign-ins would multiply that;
+# eight workers is more than a note server needs and bounds the worst case.
+MAX_WORKER_THREADS = 8
+
 # Optional: when set, /setup requires this token before creating the first administrator.
 SETUP_TOKEN = os.environ.get("FLOWNOTES_SETUP_TOKEN", "").strip()
 SESSION_COOKIE = "flownotes_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+# Uploads are streamed in 1 MiB chunks so a 20 MB image never sits in RAM whole.
+UPLOAD_CHUNK = 1024 * 1024
 # SVG can carry scripts; serving it same-origin would be XSS, so it is excluded.
 IMAGE_EXTENSIONS = {
     "image/png": ".png",
@@ -187,6 +193,7 @@ def _first_admin() -> str | None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    to_thread.current_default_thread_limiter().total_tokens = MAX_WORKER_THREADS
     file_ops.ensure_dirs()
     try:
         database.init_db()
@@ -977,17 +984,24 @@ async def api_upload(file: UploadFile = File(...), user: users.User = Depends(re
             status_code=415, detail="Only PNG, JPEG, GIF, WebP and AVIF images are accepted"
         )
 
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not data:
-        raise HTTPException(status_code=400, detail="The file is empty")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Image exceeds the 20 MB limit")
-
     name = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(4)}{extension}"
     root = file_ops.user_uploads(user.username)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    async with aiofiles.open(root / name, "wb") as handle:
-        await handle.write(data)
+    target = root / name
+    total = 0
+    try:
+        async with await open_file(target, "wb") as handle:
+            while chunk := await file.read(UPLOAD_CHUNK):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Image exceeds the 20 MB limit")
+                await handle.write(chunk)
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    if total == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="The file is empty")
     return {"url": f"/uploads/{user.username}/{name}", "filename": name}
 
 
@@ -1012,6 +1026,8 @@ def api_resync(user: users.User = Depends(require_user)):
 @api.get("/export")
 def api_export(user: users.User = Depends(require_user)):
     """Zip the caller's notes folder; write a temp file first and then stream it."""
+    import zipfile
+
     root = file_ops.user_root(user.username)
     spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
     try:

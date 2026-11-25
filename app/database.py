@@ -47,6 +47,9 @@ def connect():
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        # One connection per operation: a 1 MiB page cache is enough for a note index and keeps
+        # the transient allocation (and the RSS high-water mark) small.
+        conn.execute("PRAGMA cache_size=-1024")
         yield conn
         conn.commit()
     finally:

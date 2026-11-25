@@ -16,10 +16,13 @@ RUN node build.mjs && test -s ../static/vendor/editor.bundle.js
 
 FROM python:3.11-slim AS runtime
 
+# glibc gives every thread its own arena and rarely returns it; the request threadpool would
+# otherwise inflate RSS after a burst of parallel logins or uploads.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    FLOWNOTES_DATA=/app/data
+    FLOWNOTES_DATA=/app/data \
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 

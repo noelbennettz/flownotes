@@ -6,7 +6,7 @@ been modified, so no notice of changes is due.
 
 Summary of what the container image and the browser bundle carry:
 
-- Python runtime packages: Apache-2.0 ×2, BSD-3-Clause ×7, MIT ×11, PSF-2.0 ×1 (plus the
+- Python runtime packages: Apache-2.0 ×1, BSD-3-Clause ×5, MIT ×7, PSF-2.0 ×1 (plus the
   packaging tools listed separately below).
 - Code inside `static/vendor/editor.bundle.js`: MIT (most), ISC ×1, BSD-2-Clause ×1.
 - Build-only tools: esbuild and the Node image, which are **not** present at runtime.
@@ -21,27 +21,20 @@ image built from the current `master`.
 
 | Package | Version | Licence |
 | --- | --- | --- |
-| `aiofiles` | 24.1.0 | Apache-2.0 |
 | `annotated-types` | 0.8.0 | MIT |
 | `anyio` | 4.16.0 | MIT |
 | `click` | 8.5.1 | BSD-3-Clause |
 | `fastapi` | 0.115.6 | MIT |
 | `h11` | 0.16.0 | MIT |
-| `httptools` | 0.9.0 | MIT |
 | `idna` | 3.20 | BSD-3-Clause |
 | `itsdangerous` | 2.2.0 | BSD-3-Clause |
 | `pydantic` | 2.14.4 | MIT |
 | `pydantic-core` | 2.50.5 | MIT |
-| `python-dotenv` | 1.2.4 | BSD-3-Clause |
 | `python-multipart` | 0.0.20 | Apache-2.0 |
-| `PyYAML` | 6.0.4 | MIT |
 | `starlette` | 0.41.3 | BSD-3-Clause |
 | `typing-extensions` | 4.16.0 | PSF-2.0 |
 | `typing-inspection` | 0.4.5 | MIT |
 | `uvicorn` | 0.34.0 | BSD-3-Clause |
-| `uvloop` | 0.23.0 | MIT |
-| `watchfiles` | 1.3.0 | MIT |
-| `websockets` | 17.4 | BSD-3-Clause |
 
 `pip`, `setuptools`, `wheel` and `packaging` also live in the image because pip installed
 everything; they are packaging tools, not part of the running service. `packaging` is

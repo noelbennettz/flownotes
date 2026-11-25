@@ -17,6 +17,12 @@ requests: no CDN, no web fonts, no remote icons.
 - About 170 MB of disk for the image, plus whatever the notes take.
 - A reverse proxy that terminates TLS if the service is not on a trusted LAN.
 
+The Python process idles at roughly 50–60 MB RSS and stays under about 100 MB through a burst of
+parallel sign-ins, uploads and large-note reads: uploads are streamed in 1 MiB chunks, SQLite keeps
+a 1 MiB page cache per connection, and the request threadpool is capped at eight workers so
+scrypt's 16 MiB-per-hash cannot multiply without bound. The image also sets `MALLOC_ARENA_MAX=2`,
+which keeps glibc from retaining one malloc arena per worker thread.
+
 ## Install
 
 ### Docker Compose
