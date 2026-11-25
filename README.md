@@ -16,8 +16,9 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
   quotes, dividers, bold/italic/strikethrough/inline code, images. `/` opens the command menu,
   `# ` / `- ` / `1. ` / `> ` / `---` and a fence (` ``` ` + space) convert as you type; pasted
   screenshots are uploaded automatically, and edits autosave 600 ms after the last keystroke.
-  Saves are versioned, so a note edited on two devices never silently overwrites the other copy:
-  the conflict is shown and you pick which text to keep.
+  Saves are versioned, so a note edited on two devices is never merged blindly. By default this
+  device's text wins (Settings → Editing) and a snackbar says the other version was replaced; turn
+  that option off to get a dialog that lets you pick which text to keep.
 - **Search.** SQLite FTS5 with highlighted excerpts, plus a substring fallback for CJK queries.
 - **Interface.** Material 3 in seven languages (English, Traditional and Simplified Chinese,
   Arabic with full RTL, French, Russian, Spanish), light/dark/system themes and six accent tones.

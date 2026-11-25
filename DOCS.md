@@ -193,11 +193,13 @@ rewrite the links) if that matters for your deployment.
 `GET /api/note` returns a content-hash `version`. The browser sends it back as `base_version` on
 every save (`PUT`, and the keepalive write when the tab closes); if the file changed in the
 meantime — another device, another tab, or an SSH edit picked up by the index — the write is
-refused with `409` (current version in `X-Note-Version`) and the client asks whether to load the
-other version or keep its own instead of silently overwriting. Omitting `base_version` forces the
-write, which is what “keep mine” and older clients do. Returning to a tab also re-checks
-`/api/note/meta`, so an idle note picks up edits made elsewhere; a note that was renamed or
-deleted elsewhere is cleared instead of being saved into nothing.
+refused with `409` (current version in `X-Note-Version`). The client then keeps this device's text
+and saves it over the other version without asking; that is the default “Keep this device's edits”
+switch under Settings → Editing (`localStorage["flownotes:conflict"]` is `mine`). With the switch
+off (`ask`) it opens a dialog instead, so you can load the other version or keep your own. Omitting
+`base_version` forces the write, which is what “keep mine” and older clients do. Returning to a tab
+also re-checks `/api/note/meta`, so an idle note picks up edits made elsewhere; a note that was
+renamed or deleted elsewhere is cleared instead of being saved into nothing.
 
 “Sign out everywhere” in Settings calls `/api/me/logout-all`, which bumps `token_version`: every
 cookie for the account stops working, including the one in the current browser.

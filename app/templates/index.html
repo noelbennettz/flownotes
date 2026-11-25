@@ -386,6 +386,29 @@
           </p>
         </section>
 
+        <section class="settings-card" aria-labelledby="card-editing">
+          <h2 id="card-editing" data-i18n="settings.editing">Editing</h2>
+          <p class="m3-body-medium" data-i18n="settings.editingHint">Saved on this device only.</p>
+
+          <div class="settings-row">
+            <div class="settings-row__text">
+              <p class="m3-body-large" data-i18n="settings.keepMine">Keep this device's edits</p>
+              <p class="m3-body-medium" data-i18n="settings.keepMineHint">
+                When another device saves the same note first, your text is saved over it without asking.
+              </p>
+            </div>
+            <label class="m3-switch">
+              <input
+                id="conflict-keep-mine"
+                type="checkbox"
+                role="switch"
+                data-i18n-aria-label="settings.keepMine"
+              />
+              <span class="m3-switch__track" aria-hidden="true"></span>
+            </label>
+          </div>
+        </section>
+
         <section class="settings-card" id="users-card" aria-labelledby="card-users" hidden>
           <h2 id="card-users" data-i18n="settings.users">Users</h2>
           <p class="m3-body-medium" data-i18n="settings.usersHint">Only administrators see this.</p>

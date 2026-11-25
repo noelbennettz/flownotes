@@ -7,6 +7,7 @@ import { t } from "./i18n.js";
 
 const THEME_STORAGE = "flownotes:theme";
 const TONE_STORAGE = "flownotes:tone";
+const CONFLICT_STORAGE = "flownotes:conflict";
 
 /** Accent presets; "neutral" is the default black/white M3 scheme. */
 export const TONES = ["neutral", "blue", "pink", "red", "yellow", "cyan"];
@@ -20,6 +21,20 @@ export function applyTone(tone = storedTone()) {
   const value = TONES.includes(tone) ? tone : "neutral";
   document.documentElement.dataset.tone = value;
   localStorage.setItem(TONE_STORAGE, value);
+  return value;
+}
+
+/**
+ * What to do when another device saved the same note first: "mine" saves this device's text
+ * over it without asking (the default), "ask" opens the conflict dialog.
+ */
+export function storedConflictPolicy() {
+  return localStorage.getItem(CONFLICT_STORAGE) === "ask" ? "ask" : "mine";
+}
+
+export function applyConflictPolicy(policy) {
+  const value = policy === "ask" ? "ask" : "mine";
+  localStorage.setItem(CONFLICT_STORAGE, value);
   return value;
 }
 

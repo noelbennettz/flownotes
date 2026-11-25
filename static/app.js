@@ -11,6 +11,7 @@ import {
   confirmAction,
   showMenu,
   showSnackbar,
+  storedConflictPolicy,
   storedTheme,
   storedTone,
   toggleExplicitTheme,
@@ -224,6 +225,8 @@ async function flushSave() {
   } catch (error) {
     if (state.currentPath !== path) return false;
     if (error.status === 409) {
+      // Settings → Editing decides whether this device's text wins silently or the dialog opens.
+      if (storedConflictPolicy() === "mine") return overwriteWithMine({ automatic: true });
       openConflictDialog();
       return false;
     }
@@ -274,23 +277,35 @@ async function reloadFromServer() {
   }
 }
 
-async function overwriteWithMine() {
+/**
+ * Save this device's text over the version stored elsewhere. Called from the conflict dialog, or
+ * directly when Settings → Editing says this device's edits win without asking.
+ */
+async function overwriteWithMine({ automatic = false } = {}) {
   const path = state.currentPath;
   const content = state.pendingMarkdown;
   closeConflictDialog();
-  if (!path || content === null) return;
+  if (!path || content === null) return false;
   try {
     // No base_version: an explicit "keep my text".
     const data = await apiJson("/api/note", { method: "PUT", body: { path, content } });
+    if (state.currentPath !== path) return true;
     state.version = data.version ?? null;
     state.pendingWrite = null;
-    state.dirty = false;
     state.conflict = false;
-    setStatus("saved");
-    showSnackbar(t("toast.overwrote"));
+    if (state.pendingMarkdown === content) {
+      state.dirty = false;
+      setStatus("saved");
+    } else {
+      // More keystrokes arrived while saving; stay dirty for the next tick.
+      setStatus("dirty");
+    }
+    showSnackbar(t(automatic ? "toast.keptMine" : "toast.overwrote"));
+    return true;
   } catch (error) {
     state.conflict = false;
     setStatus("error", error.message || t("status.error"));
+    return false;
   }
 }
 
