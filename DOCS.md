@@ -45,8 +45,9 @@ docker run -d --name flownotes --user "$(id -u):$(id -g)" -p 8000:8000 \
 Markdown files stay editable. Omit it only if you accept root-owned files, or set it to `0:0`
 on rootless Docker (see [Troubleshooting](#troubleshooting)).
 
-The package is private by default, so pulling needs `docker login ghcr.io` with a token that
-can read packages.
+If `docker pull` answers 403 the package is still private (the default for user accounts):
+run `docker login ghcr.io` with a token that can read packages, or change the package visibility
+in its settings. The repository itself is public.
 
 ### Manual
 

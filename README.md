@@ -42,7 +42,9 @@ Prefer the published image:
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-`ghcr.io/noelbennettz/flownotes:latest` is private by default, so `docker login ghcr.io` first.
+`ghcr.io/noelbennettz/flownotes:latest` is built by this repository's workflow. If `docker
+pull` answers 403, the package is still private: `docker login ghcr.io` with a token that can read
+packages, or flip the package visibility in its settings.
 
 Without Docker:
 
