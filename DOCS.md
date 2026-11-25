@@ -151,14 +151,16 @@ cookie. Payloads are JSON; errors are `{"detail": "…"}` with a matching status
 | --- | --- | --- | --- |
 | GET | `/api/setup/status` | — | `{needs_setup, requires_token}` |
 | POST | `/api/setup` | `{username, password, token, lang}` | Creates the first administrator; succeeds once |
-| POST | `/api/login` | `{username, password, lang}` | Sets the cookie; 10 failures per IP+account per 5 min → `429` |
+| POST | `/api/login` | `{username, password, lang}` | Sets the cookie; 10 failures per IP+account, 30 per IP, per 5 min → `429` |
 | POST | `/api/logout` | — | Clears the cookie |
 | GET | `/api/me` | — | Current account |
 | POST | `/api/me/password` | `{current_password, new_password}` | Bumps `token_version`, re-issues the cookie |
+| POST | `/api/me/logout-all` | — | Bumps `token_version`: every session ends, including the caller's |
 | GET | `/api/tree` | — | Nested `{name, path, type, mtime, children}` |
-| GET | `/api/note` | `?path=` | `{path, content}` |
+| GET | `/api/note` | `?path=` | `{path, content, version}` |
+| GET | `/api/note/meta` | `?path=` | `{path, version, mtime, size}`; no body |
 | POST | `/api/note` | `{path, content}` | Creates; `409` if it exists |
-| PUT | `/api/note` | `{path, content}` | Updates; `404` if missing |
+| PUT | `/api/note` | `{path, content, base_version?}` | Updates; `409` when `base_version` is stale, `404` if missing |
 | DELETE | `/api/note` | `?path=` | File or folder (recursive) |
 | POST | `/api/folder` | `{path}` | Creates nested folders |
 | POST | `/api/rename` | `{old_path, new_path}` | Rename and/or move; `409` on collision |
@@ -175,6 +177,20 @@ Uploads are served from `/uploads/<account>/<file>` and require a session; only 
 administrator may read them. Legacy `/uploads/<file>` links (from the single-user layout) have no
 owner on disk, so any signed-in account can read them — move them into an account folder (and
 rewrite the links) if that matters for your deployment.
+
+### Concurrent edits
+
+`GET /api/note` returns a content-hash `version`. The browser sends it back as `base_version` on
+every save (`PUT`, and the keepalive write when the tab closes); if the file changed in the
+meantime — another device, another tab, or an SSH edit picked up by the index — the write is
+refused with `409` (current version in `X-Note-Version`) and the client asks whether to load the
+other version or keep its own instead of silently overwriting. Omitting `base_version` forces the
+write, which is what “keep mine” and older clients do. Returning to a tab also re-checks
+`/api/note/meta`, so an idle note picks up edits made elsewhere; a note that was renamed or
+deleted elsewhere is cleared instead of being saved into nothing.
+
+“Sign out everywhere” in Settings calls `/api/me/logout-all`, which bumps `token_version`: every
+cookie for the account stops working, including the one in the current browser.
 
 ## Operations
 

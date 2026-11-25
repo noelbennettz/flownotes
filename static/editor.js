@@ -15,6 +15,7 @@ import {
 } from "./vendor/editor.bundle.js";
 
 import { t } from "./i18n.js";
+import { apiFetch } from "./ui.js";
 
 const SLASH_ITEMS = [
   {
@@ -238,8 +239,7 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
     form.append("file", file, file.name || "pasted-image.png");
     onUpload("start");
     try {
-      const response = await fetch("/api/upload", { method: "POST", body: form });
-      if (!response.ok) throw new Error(`Upload failed (${response.status})`);
+      const response = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await response.json();
       if (!data.url) throw new Error("Upload response has no url");
       editor
@@ -377,24 +377,5 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
     editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
   }
 
-  return {
-    get editor() {
-      return editor;
-    },
-    setMarkdown,
-    setPlaceholder,
-    getMarkdown: () => (editor ? editor.storage.markdown.getMarkdown() : ""),
-    focus: () => editor.commands.focus("end"),
-    setEditable: (value) => {
-      editor.setEditable(value);
-      if (!value) closeMenu();
-    },
-    destroy: () => {
-      document.removeEventListener("mousedown", handleDocumentMouseDown);
-      closeMenu();
-      menu.remove();
-      fileInput.remove();
-      editor.destroy();
-    },
-  };
+  return { setMarkdown, setPlaceholder, focus: () => editor.commands.focus("end") };
 }

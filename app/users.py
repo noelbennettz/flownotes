@@ -177,6 +177,17 @@ def set_password(username: str, password: str) -> None:
         )
 
 
+def sign_out_everywhere(username: str) -> None:
+    """Invalidate every cookie issued for the account, including the caller's own."""
+    clean = file_ops.sanitize_username(username)
+    with database._lock, database.connect() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET token_version = token_version + 1 WHERE username = ?", (clean,)
+        )
+        if cursor.rowcount == 0:
+            raise UserError("User not found")
+
+
 def set_admin(username: str, is_admin: bool) -> None:
     clean = file_ops.sanitize_username(username)
     user = get_user(clean)

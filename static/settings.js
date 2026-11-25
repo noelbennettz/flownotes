@@ -46,6 +46,7 @@ const els = {
   exportButton: document.getElementById("btn-settings-export"),
   resync: document.getElementById("btn-resync"),
   logout: document.getElementById("btn-logout"),
+  logoutAll: document.getElementById("btn-logout-all"),
 };
 
 let me = null;
@@ -379,6 +380,23 @@ els.logout.addEventListener("click", async () => {
     await apiFetch("/api/logout", { method: "POST" });
   } catch (error) {
     /* Still navigate away. */
+  }
+  window.location.href = "/login";
+});
+
+els.logoutAll.addEventListener("click", async () => {
+  const ok = await confirmAction({
+    title: t("settings.logoutAll.title"),
+    body: t("settings.logoutAll.body"),
+    confirmLabel: t("settings.logoutAll.confirm"),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await apiFetch("/api/me/logout-all", { method: "POST" });
+  } catch (error) {
+    showSnackbar(error.message);
+    return;
   }
   window.location.href = "/login";
 });

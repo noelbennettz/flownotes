@@ -8,10 +8,12 @@ place that turns user input into a filesystem path.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 DATA_DIR = Path(
@@ -30,6 +32,19 @@ _USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 
 class PathError(ValueError):
     """Invalid path or user name."""
+
+
+class NoteConflict(ValueError):
+    """The file changed after the client read it; carries the version now on disk."""
+
+    def __init__(self, current_version: str):
+        super().__init__("This note changed on another device")
+        self.current_version = current_version
+
+
+# Compare-then-replace has to be atomic, or two writers can both pass the check.
+# The app runs as a single process (uvicorn without workers), so a process lock is enough.
+_WRITE_LOCK = threading.RLock()
 
 
 def ensure_dirs() -> None:
@@ -192,33 +207,104 @@ def normalize_folder_path(rel_path: str) -> str:
     return candidate
 
 
-def read_note(root: Path, rel_path: str) -> str:
+def _note_version(path: Path) -> str:
+    """Content hash used as the optimistic-concurrency token."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def read_note(root: Path, rel_path: str) -> tuple[str, str]:
+    """Return (content, version); the version is what a later save must quote."""
     path = resolve_safe_path(rel_path, root=root, must_exist=True)
     if not path.is_file():
         raise PathError("Not a file")
-    return path.read_text(encoding="utf-8", errors="replace")
+    data = path.read_bytes()
+    return data.decode("utf-8", errors="replace"), hashlib.sha256(data).hexdigest()
 
 
-def write_note(root: Path, rel_path: str, content: str) -> str:
-    """Write a note; create parent folders and replace atomically to avoid half-written files."""
-    normalized = normalize_note_path(rel_path)
-    path = resolve_safe_path(normalized, root=root)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+def note_meta(root: Path, rel_path: str) -> dict:
+    """Cheap check for “did this note change elsewhere?” without sending the content."""
+    path = resolve_safe_path(rel_path, root=root, must_exist=True)
+    if not path.is_file():
+        raise PathError("Not a note file")
+    stat = path.stat()
+    return {
+        "version": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "mtime": int(stat.st_mtime),
+        "size": stat.st_size,
+    }
 
+
+def _write_temp(path: Path, data: bytes) -> str:
     handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=NOTE_SUFFIX)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as tmp_file:
-            tmp_file.write(content)
+        with os.fdopen(handle, "wb") as tmp_file:
+            tmp_file.write(data)
             tmp_file.flush()
             os.fsync(tmp_file.fileno())
-        os.replace(tmp_name, path)
     except BaseException:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
         raise
-    return normalized
+    return tmp_name
+
+
+def write_note(
+    root: Path,
+    rel_path: str,
+    content: str,
+    *,
+    base_version: str | None = None,
+    create_only: bool = False,
+    must_exist: bool = False,
+) -> tuple[str, str]:
+    """Create or replace a note and return (normalized path, new version).
+
+    ``base_version`` turns the write into an optimistic-concurrency update: the write is
+    refused with NoteConflict when the file no longer has that version. ``create_only``
+    fails if the note already exists, and ``must_exist`` refuses to create a new one.
+    The compare, the atomic replace and the version all happen under one lock.
+    """
+    normalized = normalize_note_path(rel_path)
+    path = resolve_safe_path(normalized, root=root)
+    data = content.encode("utf-8")
+    version = hashlib.sha256(data).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    with _WRITE_LOCK:
+        existing = path.is_file()
+        if create_only and path.exists():
+            raise FileExistsError(f"{normalized} already exists")
+        if must_exist and not existing:
+            raise FileNotFoundError(f"Not found: {normalized}")
+        if base_version is not None:
+            if not existing:
+                raise FileNotFoundError(f"Not found: {normalized}")
+            current = _note_version(path)
+            if current != base_version:
+                raise NoteConflict(current)
+
+        tmp_name = _write_temp(path, data)
+        try:
+            if create_only:
+                # link() fails atomically if another writer created the file meanwhile.
+                try:
+                    os.link(tmp_name, path)
+                except FileExistsError:
+                    raise
+                except OSError:
+                    # Filesystems without hard links: fall back to an exclusive create.
+                    with open(path, "xb") as target:
+                        target.write(data)
+            else:
+                os.replace(tmp_name, path)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+    return normalized, version
 
 
 def create_folder(root: Path, rel_path: str) -> str:

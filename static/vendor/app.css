@@ -591,6 +591,7 @@ kbd {
 
 .save-state[data-state="saving"] { color: var(--md-primary); background: var(--md-primary-container); }
 .save-state[data-state="dirty"] { color: var(--md-on-tertiary-container); background: var(--md-tertiary-container); }
+.save-state[data-state="conflict"] { color: var(--md-on-error-container); background: var(--md-error-container); }
 .save-state[data-state="error"] { color: var(--md-on-error-container); background: var(--md-error-container); }
 
 /* ---------- Tree (M3 list items) ---------- */
@@ -1116,6 +1117,17 @@ kbd {
 .snackbar__action:hover { background: rgba(255, 255, 255, 0.08); }
 
 /* ---------- Settings page ---------- */
+
+/* ---------- Settings view (same document as the notes) ---------- */
+
+#settings-view {
+  display: none;
+  height: 100vh;
+  height: 100dvh;
+}
+
+html[data-view="settings"] #settings-view { display: flex; }
+html[data-view="settings"] .layout { display: none; }
 
 /* ---------- Settings view (same document as the notes) ---------- */
 

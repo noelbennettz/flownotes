@@ -10,11 +10,14 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
 - **Plain files.** One Markdown file per note, one folder per sidebar folder. Edit them with
   any editor; the tree and the index catch up.
 - **Multi-user.** Every account owns `data/notes/<name>/` and `data/uploads/<name>/`; the index
-  is isolated by owner. Administrators create, disable and delete accounts, and reset passwords.
+  is isolated by owner. Administrators create, disable and delete accounts, and reset passwords;
+  “Sign out everywhere” revokes every session of an account at once.
 - **Editor.** Tiptap with Markdown round-tripping: headings, lists, task lists, code blocks,
   quotes, dividers, bold/italic/strikethrough/inline code, images. `/` opens the command menu,
   `# ` / `- ` / `1. ` / `> ` / `---` and a fence (` ``` ` + space) convert as you type; pasted
   screenshots are uploaded automatically, and edits autosave 600 ms after the last keystroke.
+  Saves are versioned, so a note edited on two devices never silently overwrites the other copy:
+  the conflict is shown and you pick which text to keep.
 - **Search.** SQLite FTS5 with highlighted excerpts, plus a substring fallback for CJK queries.
 - **Interface.** Material 3 in seven languages (English, Traditional and Simplified Chinese,
   Arabic with full RTL, French, Russian, Spanish), light/dark/system themes and six accent tones.

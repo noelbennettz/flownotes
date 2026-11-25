@@ -26,6 +26,7 @@ const STATUS_KEYS = {
   saved: "status.saved",
   saving: "status.saving",
   dirty: "status.dirty",
+  conflict: "status.conflict",
   error: "status.error",
 };
 
@@ -64,14 +65,19 @@ const els = {
   searchResults: document.getElementById("search-results"),
   settingsLink: document.getElementById("btn-settings"),
   settingsBack: document.getElementById("btn-settings-back"),
+  conflictDialog: document.getElementById("conflict-dialog"),
+  conflictBody: document.getElementById("conflict-body"),
+  conflictReload: document.getElementById("conflict-reload"),
+  conflictOverwrite: document.getElementById("conflict-overwrite"),
 };
 
 const state = {
   username: null,
-  isAdmin: false,
   tree: [],
   currentPath: null,
+  version: null,
   dirty: false,
+  conflict: false,
   saveTimer: null,
   searchTimer: null,
   searchResults: [],
@@ -174,34 +180,148 @@ function scheduleSave() {
 async function flushSave() {
   window.clearTimeout(state.saveTimer);
   state.saveTimer = null;
-  if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return;
+  if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return true;
+  // A conflict is waiting on the user; do not overwrite the other device's text.
+  if (state.conflict) return false;
 
   const path = state.currentPath;
   const content = state.pendingMarkdown;
   setStatus("saving");
   try {
-    await apiFetch("/api/note", { method: "PUT", body: { path, content } });
+    const data = await apiJson("/api/note", {
+      method: "PUT",
+      body: { path, content, base_version: state.version },
+    });
     if (state.currentPath === path && state.pendingMarkdown === content) {
       state.dirty = false;
+      state.version = data.version ?? null;
       setStatus("saved");
     } else if (state.currentPath === path) {
       // More keystrokes arrived while saving; stay dirty for the next tick.
+      state.version = data.version ?? state.version;
       setStatus("dirty");
     }
+    return true;
   } catch (error) {
-    if (!state.currentPath) return;
+    if (state.currentPath !== path) return false;
+    if (error.status === 409) {
+      openConflictDialog();
+      return false;
+    }
+    if (error.status === 404) {
+      // Renamed or deleted on another device: drop the stale entry from the tree.
+      void refreshTree().catch(() => {});
+    }
     setStatus("error", error.message || t("status.error"));
+    return false;
+  }
+}
+
+/* ---------- Concurrent edits ---------- */
+
+/** Another device saved this note first; the user picks which text survives. */
+function openConflictDialog() {
+  state.conflict = true;
+  setStatus("conflict");
+  if (!els.conflictDialog) return;
+  els.conflictBody.textContent = t("conflict.body", { path: displayName(state.currentPath || "") });
+  els.conflictDialog.hidden = false;
+  els.conflictReload.focus();
+}
+
+function closeConflictDialog() {
+  if (els.conflictDialog) els.conflictDialog.hidden = true;
+}
+
+async function reloadFromServer() {
+  const path = state.currentPath;
+  closeConflictDialog();
+  if (!path) return;
+  try {
+    const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
+    const view = await ensureEditor();
+    state.version = data.version ?? null;
+    state.pendingMarkdown = null;
+    state.dirty = false;
+    state.conflict = false;
+    view.setMarkdown(data.content || "");
+    setStatus("saved");
+    showSnackbar(t("toast.reloadedFromServer"));
+  } catch (error) {
+    state.conflict = false;
+    showSnackbar(error.message || t("toast.readFailed"));
+    await refreshTree().catch(() => {});
+  }
+}
+
+async function overwriteWithMine() {
+  const path = state.currentPath;
+  const content = state.pendingMarkdown;
+  closeConflictDialog();
+  if (!path || content === null) return;
+  try {
+    // No base_version: an explicit "keep my text".
+    const data = await apiJson("/api/note", { method: "PUT", body: { path, content } });
+    state.version = data.version ?? null;
+    state.dirty = false;
+    state.conflict = false;
+    setStatus("saved");
+    showSnackbar(t("toast.overwrote"));
+  } catch (error) {
+    state.conflict = false;
+    setStatus("error", error.message || t("status.error"));
+  }
+}
+
+/** Coming back to the tab: pick up edits saved elsewhere while this note was idle. */
+let lastMetaCheck = 0;
+
+async function syncOpenNote() {
+  if (document.visibilityState !== "visible") return;
+  if (!state.currentPath || state.dirty || state.conflict) return;
+  if (Date.now() - lastMetaCheck < 3000) return;
+  lastMetaCheck = Date.now();
+  const path = state.currentPath;
+  try {
+    const meta = await apiJson(`/api/note/meta?path=${encodeURIComponent(path)}`);
+    if (state.currentPath !== path || state.dirty || state.conflict) return;
+    if (!meta.version || meta.version === state.version) return;
+    const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
+    if (state.currentPath !== path || state.dirty) return;
+    const view = await ensureEditor();
+    state.version = data.version ?? null;
+    state.pendingMarkdown = null;
+    view.setMarkdown(data.content || "");
+    setStatus("saved");
+    showSnackbar(t("toast.reloadedFromServer"));
+  } catch (error) {
+    if (error.status !== 404) return;
+    // Deleted or renamed elsewhere: clear the stale note instead of silently saving into nothing.
+    window.clearTimeout(state.saveTimer);
+    state.currentPath = null;
+    state.version = null;
+    state.dirty = false;
+    state.pendingMarkdown = null;
+    resetEditorView();
+    localStorage.removeItem(scopedKey("last-note"));
+    showSnackbar(t("toast.noteGone"));
+    await refreshTree().catch(() => {});
   }
 }
 
 /** Send pending edits when the tab is closed or hidden (keepalive fetch). */
 function flushOnLeave() {
   if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return;
+  if (state.conflict) return;
   try {
     fetch("/api/note", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: state.currentPath, content: state.pendingMarkdown }),
+      body: JSON.stringify({
+        path: state.currentPath,
+        content: state.pendingMarkdown,
+        base_version: state.version,
+      }),
       keepalive: true,
     }).catch(() => {});
     state.dirty = false;
@@ -345,7 +465,9 @@ function renderBreadcrumb(path) {
 
 function resetEditorView() {
   state.currentPath = null;
+  state.version = null;
   state.dirty = false;
+  state.conflict = false;
   state.pendingMarkdown = null;
   // The editor only exists once a note has been opened; never load it just to clear it.
   if (editor) editor.setMarkdown("");
@@ -359,14 +481,21 @@ async function openNote(path) {
   if (path === state.currentPath) {
     // Tapping the already-open note should still close the drawer on mobile.
     if (isMobile()) setDrawer(true);
+    // It is also a cheap way to pick up an edit made on another device.
+    await syncOpenNote();
     return;
   }
-  await flushSave();
+  if (!(await flushSave())) {
+    if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+    return;
+  }
   try {
     const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
     const view = await ensureEditor();
     state.currentPath = path;
+    state.version = data.version ?? null;
     state.dirty = false;
+    state.conflict = false;
     state.pendingMarkdown = null;
     view.setMarkdown(data.content || "");
     els.canvas.classList.add("has-note");
@@ -397,7 +526,10 @@ async function createNote(parentPath = "") {
   });
   if (!value) return;
   try {
-    await flushSave();
+    if (!(await flushSave())) {
+      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      return;
+    }
     const data = await apiJson("/api/note", { method: "POST", body: { path: value, content: "" } });
     expandAncestors(data.path);
     await refreshTree();
@@ -554,7 +686,10 @@ async function renameEntry(row) {
   if (next === current) return;
 
   try {
-    await flushSave();
+    if (!(await flushSave())) {
+      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      return;
+    }
     const data = await apiJson("/api/rename", {
       method: "POST",
       body: { old_path: current, new_path: next },
@@ -580,7 +715,10 @@ async function movePath(path, type, targetFolder) {
     return;
   }
   try {
-    await flushSave();
+    if (!(await flushSave())) {
+      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      return;
+    }
     const data = await apiJson("/api/rename", {
       method: "POST",
       body: { old_path: path, new_path: newPath },
@@ -608,7 +746,10 @@ async function deleteEntry(row) {
   });
   if (!ok) return;
   try {
-    await flushSave();
+    if (!(await flushSave())) {
+      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      return;
+    }
     await apiFetch(`/api/note?path=${encodeURIComponent(path)}`, { method: "DELETE" });
     const removingCurrent =
       state.currentPath === path ||
@@ -733,7 +874,6 @@ async function pickLanguage() {
   );
   if (!choice) return;
   setLocale(choice);
-  relocalize();
 }
 
 function relocalize() {
@@ -935,6 +1075,16 @@ document.addEventListener("localechange", relocalize);
 window.addEventListener("pagehide", flushOnLeave);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushOnLeave();
+  else void syncOpenNote();
+});
+window.addEventListener("focus", () => void syncOpenNote());
+
+/* The conflict dialog is deliberately not dismissable: the next save would overwrite the
+   other device's text, so the user has to pick one of the two versions. */
+els.conflictReload.addEventListener("click", () => void reloadFromServer());
+els.conflictOverwrite.addEventListener("click", () => void overwriteWithMine());
+els.conflictDialog.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") event.preventDefault();
 });
 
 window.matchMedia(MOBILE_QUERY).addEventListener("change", () => {
@@ -1008,7 +1158,6 @@ async function startNotes() {
   try {
     const me = await apiJson("/api/me");
     state.username = me.username;
-    state.isAdmin = Boolean(me.is_admin);
     els.userName.textContent = me.username;
     els.userAvatar.textContent = me.username.slice(0, 1).toUpperCase();
     applyDocumentTitle();

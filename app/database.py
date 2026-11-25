@@ -68,10 +68,9 @@ def _has_owner_column(conn: sqlite3.Connection) -> bool:
     return "owner" in columns
 
 
-def init_db() -> bool:
-    """Create or upgrade the index schema; returns True if an old schema was dropped."""
+def init_db() -> None:
+    """Create the index schema; an index from the single-user layout is dropped and rebuilt."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    rebuilt = False
     with _lock, connect() as conn:
         if conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='notes_fts'"
@@ -80,9 +79,7 @@ def init_db() -> bool:
                 conn.executescript(
                     "DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes_state;"
                 )
-                rebuilt = True
         conn.executescript(SCHEMA)
-    return rebuilt
 
 
 def _derive_title(path: str, content: str) -> str:

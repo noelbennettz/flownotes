@@ -311,11 +311,26 @@
               At least 8 characters.
             </p>
             <div class="settings-actions">
-              <button class="m3-btn m3-btn--filled" id="btn-password" type="submit" data-i18n="settings.updatePassword">
+              <button
+                class="m3-btn m3-btn--filled"
+                id="btn-password"
+                type="submit"
+                data-i18n="settings.updatePassword"
+              >
                 Update password
               </button>
             </div>
           </form>
+          <div class="settings-actions">
+            <button
+              class="m3-btn m3-btn--outlined"
+              id="btn-logout-all"
+              type="button"
+              data-i18n="settings.logoutAll"
+            >
+              Sign out everywhere
+            </button>
+          </div>
         </section>
 
         <section class="settings-card" aria-labelledby="card-appearance">
@@ -471,6 +486,33 @@
         <div class="dialog__actions">
           <button class="m3-btn m3-btn--text" id="confirm-cancel" type="button">Cancel</button>
           <button class="m3-btn m3-btn--filled" id="confirm-ok" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-scrim" id="conflict-dialog" hidden>
+      <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="conflict-title">
+        <h2 class="dialog__title" id="conflict-title" data-i18n="conflict.title">
+          Changed on another device
+        </h2>
+        <p class="dialog__body" id="conflict-body"></p>
+        <div class="dialog__actions">
+          <button
+            class="m3-btn m3-btn--danger"
+            id="conflict-overwrite"
+            type="button"
+            data-i18n="conflict.overwrite"
+          >
+            Keep mine
+          </button>
+          <button
+            class="m3-btn m3-btn--filled"
+            id="conflict-reload"
+            type="button"
+            data-i18n="conflict.reload"
+          >
+            Load theirs
+          </button>
         </div>
       </div>
     </div>

@@ -81,15 +81,21 @@ export async function apiFetch(path, { method = "GET", body, headers } = {}) {
       429: "error.rateLimited",
     };
     let message = byStatus[response.status] ? t(byStatus[response.status]) : t("error.server");
+    let detail;
     try {
       const data = await response.json();
-      if (data && data.detail && !byStatus[response.status]) {
-        message = typeof data.detail === "string" ? data.detail : String(data.detail);
+      detail = data ? data.detail : undefined;
+      if (detail && !byStatus[response.status]) {
+        message = typeof detail === "string" ? detail : String(detail);
       }
     } catch (error) {
       /* keep the status-based message */
     }
-    throw new Error(message);
+    // Callers need the status: a 409 on save means another device changed the note.
+    const failure = new Error(message);
+    failure.status = response.status;
+    failure.detail = detail;
+    throw failure;
   }
   return response;
 }
@@ -143,7 +149,6 @@ export function askText({
   confirmLabel = "",
   danger = false,
   inputType = "text",
-  allowEmpty = false,
 } = {}) {
   const scrim = document.getElementById("input-dialog");
   if (!scrim) return Promise.resolve(null);
@@ -178,7 +183,7 @@ export function askText({
 
     const read = () => {
       const value = input.value.trim();
-      return allowEmpty ? value : value || null;
+      return value || null;
     };
 
     ok.addEventListener("click", () => close(read()), { signal });

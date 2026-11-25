@@ -54,7 +54,9 @@ IMAGE_EXTENSIONS = {
 }
 
 FAIL_WINDOW = 300
-FAIL_LIMIT = 10
+FAIL_LIMIT = 10  # failed sign-ins per (address, account) inside the window
+FAIL_IP_LIMIT = 30  # failed sign-ins per address, so spraying account names does not bypass it
+MAX_THROTTLE_KEYS = 2048  # rotating account names must not grow the map without bound
 _failed_logins: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
 _last_sync: dict[str, float] = {}
@@ -115,7 +117,7 @@ def ensure_workspace(username: str, locale: str | None = None) -> None:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not file_ops.list_note_paths(root):
         name, body = welcome.note_for(locale)
-        path = file_ops.write_note(root, name, body)
+        path, _version = file_ops.write_note(root, name, body)
         database.upsert_note_index(username, path, None, body)
 
 
@@ -263,6 +265,13 @@ def _issue_session(response, user: users.User) -> None:
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, file_ops.PathError):
         return HTTPException(status_code=400, detail=str(exc) or "Invalid path")
+    if isinstance(exc, file_ops.NoteConflict):
+        # The client compares versions and offers to reload or overwrite.
+        return HTTPException(
+            status_code=409,
+            detail="This note changed on another device",
+            headers={"X-Note-Version": exc.current_version},
+        )
     if isinstance(exc, users.UserError):
         return HTTPException(status_code=400, detail=str(exc) or "Account operation failed")
     if isinstance(exc, FileExistsError):
@@ -604,15 +613,39 @@ def _throttle_key(request: Request, username: str) -> tuple[str, str]:
     return (host, username.strip().lower())
 
 
-def _assert_not_throttled(key: tuple[str, str]) -> None:
-    now = time.time()
-    bucket = _failed_logins[key]
+def _prune_bucket(bucket: deque[float], now: float) -> None:
     while bucket and now - bucket[0] > FAIL_WINDOW:
         bucket.popleft()
-    if len(bucket) >= FAIL_LIMIT:
+
+
+def _prune_throttle(now: float) -> None:
+    """Drop stale buckets; only runs once the map gets large, so the common path stays cheap."""
+    if len(_failed_logins) <= MAX_THROTTLE_KEYS:
+        return
+    for key in list(_failed_logins):
+        _prune_bucket(_failed_logins[key], now)
+        if not _failed_logins[key]:
+            _failed_logins.pop(key, None)
+
+
+def _assert_not_throttled(key: tuple[str, str]) -> None:
+    now = time.time()
+    _prune_throttle(now)
+    bucket = _failed_logins[key]
+    _prune_bucket(bucket, now)
+    address_bucket = _failed_logins[(key[0], "*")]
+    _prune_bucket(address_bucket, now)
+    if len(bucket) >= FAIL_LIMIT or len(address_bucket) >= FAIL_IP_LIMIT:
         raise HTTPException(
             status_code=429, detail="Too many failed sign-ins; try again in 5 minutes"
         )
+
+
+def _record_failure(key: tuple[str, str]) -> None:
+    now = time.time()
+    _failed_logins[key].append(now)
+    _failed_logins[(key[0], "*")].append(now)
+    _prune_throttle(now)
 
 
 @app.post("/api/login")
@@ -629,7 +662,7 @@ def login(payload: LoginPayload, request: Request):
 
     user = users.authenticate(username, payload.password)
     if user is None:
-        _failed_logins[key].append(time.time())
+        _record_failure(key)
         raise HTTPException(status_code=401, detail="Wrong account or password")
 
     _failed_logins.pop(key, None)
@@ -649,6 +682,18 @@ def logout():
 @app.get("/api/me")
 def api_me(user: users.User = Depends(require_user)):
     return user.as_dict()
+
+
+@app.post("/api/me/logout-all")
+def logout_everywhere(user: users.User = Depends(require_user)):
+    """Sign out every device: the account's token_version changes, so all cookies stop working."""
+    try:
+        users.sign_out_everywhere(user.username)
+    except Exception as exc:  # noqa: BLE001
+        raise _http_error(exc) from exc
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
 class PasswordPayload(BaseModel):
@@ -757,6 +802,7 @@ def admin_delete_user(username: str, admin: users.User = Depends(require_admin))
         trash = users.delete_user(username)
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
+    _last_sync.pop(username.strip().lower(), None)
     return {"ok": True, "trash": trash}
 
 
@@ -766,6 +812,8 @@ api = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 class NotePayload(BaseModel):
     path: str = ""
     content: str = ""
+    # The version the client read; omit to force the write (explicit "keep mine").
+    base_version: str | None = None
 
 
 class FolderPayload(BaseModel):
@@ -800,39 +848,50 @@ def api_read_note(
     path: str = Query(..., min_length=1, max_length=1024), user: users.User = Depends(require_user)
 ):
     try:
-        content = file_ops.read_note(file_ops.user_root(user.username), path)
+        content, version = file_ops.read_note(file_ops.user_root(user.username), path)
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
-    return {"path": path, "content": content}
+    return {"path": path, "content": content, "version": version}
+
+
+@api.get("/note/meta")
+def api_note_meta(
+    path: str = Query(..., min_length=1, max_length=1024), user: users.User = Depends(require_user)
+):
+    """Version of a note without its body, for “did another device change this?” checks."""
+    try:
+        meta = file_ops.note_meta(file_ops.user_root(user.username), path)
+    except Exception as exc:  # noqa: BLE001
+        raise _http_error(exc) from exc
+    return {"path": path, **meta}
 
 
 @api.post("/note")
 def api_create_note(payload: NotePayload, user: users.User = Depends(require_user)):
     root = file_ops.user_root(user.username)
     try:
-        normalized = file_ops.normalize_note_path(payload.path)
-        if file_ops.resolve_safe_path(normalized, root=root).exists():
-            raise FileExistsError(f"{normalized} already exists")
-        saved = file_ops.write_note(root, normalized, payload.content)
+        saved, version = file_ops.write_note(root, payload.path, payload.content, create_only=True)
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
     database.upsert_note_index(user.username, saved, None, payload.content)
-    return {"ok": True, "path": saved}
+    return {"ok": True, "path": saved, "version": version}
 
 
 @api.put("/note")
 def api_update_note(payload: NotePayload, user: users.User = Depends(require_user)):
     root = file_ops.user_root(user.username)
     try:
-        normalized = file_ops.normalize_note_path(payload.path)
-        target = file_ops.resolve_safe_path(normalized, root=root, must_exist=True)
-        if not target.is_file():
-            raise file_ops.PathError("Not a note file")
-        saved = file_ops.write_note(root, normalized, payload.content)
+        saved, version = file_ops.write_note(
+            root,
+            payload.path,
+            payload.content,
+            base_version=payload.base_version,
+            must_exist=True,
+        )
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
     database.upsert_note_index(user.username, saved, None, payload.content)
-    return {"ok": True, "path": saved}
+    return {"ok": True, "path": saved, "version": version}
 
 
 @api.delete("/note")
