@@ -675,13 +675,20 @@ def change_password(payload: PasswordPayload, user: users.User = Depends(require
     return response
 
 
+def _app_html(view: str) -> str:
+    """Serve the app shell with its initial view baked into <html>, so a deep link to /settings
+    never paints the notes layout first. Both URLs share one document and one set of scripts."""
+    html = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+    return html.replace('data-view="notes"', f'data-view="{view}"', 1)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     if users.count_users() == 0:
         return RedirectResponse("/setup", status_code=303)
     if _current_user(request) is None:
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse((TEMPLATE_DIR / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(_app_html("notes"))
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -690,7 +697,7 @@ def settings_page(request: Request):
         return RedirectResponse("/setup", status_code=303)
     if _current_user(request) is None:
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse((TEMPLATE_DIR / "settings.html").read_text(encoding="utf-8"))
+    return HTMLResponse(_app_html("settings"))
 
 
 admin_api = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])

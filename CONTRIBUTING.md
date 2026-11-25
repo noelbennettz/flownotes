@@ -13,8 +13,8 @@ in their spare time, so a focused change with a clear commit message goes a long
 | `app/main.py` | FastAPI routes, auth dependency, setup wizard, uploads, export. |
 | `app/welcome.py` | The seed note a new account receives, in the language of its first sign-in. |
 | `app/cli.py` | Rescue tool: `list`, `passwd`, `create`. |
-| `app/templates/` | `index.html` and `settings.html`, plus the login/setup pages inlined in `main.py`. |
-| `static/` | `app.js`, `editor.js`, `settings.js`, `ui.js`, `i18n.js`, `vendor/app.css`, the prebuilt `vendor/editor.bundle.js`. |
+| `app/templates/` | `index.html`, the single-page shell that also holds the settings view, plus the login/setup pages inlined in `main.py`. |
+| `static/` | `app.js` (router, tree, editor glue), `editor.js`, `settings.js` (loaded on demand), `ui.js`, `i18n.js`, `vendor/app.css`, the prebuilt `vendor/editor.bundle.js`. |
 | `vendor-build/` | esbuild script that produces `editor.bundle.js`. Build-time only. |
 | `scripts/` | CI helpers; `prune-runs.sh` keeps the Actions tab small. |
 | `docs/screenshots/` | The images used by the README. |

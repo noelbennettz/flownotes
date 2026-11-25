@@ -1117,6 +1117,17 @@ kbd {
 
 /* ---------- Settings page ---------- */
 
+/* ---------- Settings view (same document as the notes) ---------- */
+
+#settings-view {
+  display: none;
+  height: 100vh;
+  height: 100dvh;
+}
+
+html[data-view="settings"] #settings-view { display: flex; }
+html[data-view="settings"] .layout { display: none; }
+
 .settings {
   flex: 1 1 auto;
   min-height: 0;

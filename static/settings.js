@@ -15,7 +15,7 @@ import {
   TONES,
   watchSystemTheme,
 } from "./ui.js";
-import { LOCALES, getLocale, initI18n, localeInfo, setLocale, t } from "./i18n.js";
+import { LOCALES, getLocale, setLocale, t } from "./i18n.js";
 
 const ICONS = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="8" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M11.2 12H20M17 12v3M14.5 12v2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
@@ -43,18 +43,14 @@ const els = {
   usersCard: document.getElementById("users-card"),
   userList: document.getElementById("user-list"),
   addUser: document.getElementById("btn-add-user"),
-  exportButton: document.getElementById("btn-export"),
+  exportButton: document.getElementById("btn-settings-export"),
   resync: document.getElementById("btn-resync"),
   logout: document.getElementById("btn-logout"),
 };
 
-initI18n();
-applyTheme(storedTheme());
-applyTone(storedTone());
-
 let me = null;
 let usersCache = [];
-let passwordHintKey = "settings.passwordHint";
+let watchingSystemTheme = false;
 
 function markThemeChoice(choice) {
   els.themeSegmented.querySelectorAll("[data-theme-choice]").forEach((button) => {
@@ -388,7 +384,6 @@ els.logout.addEventListener("click", async () => {
 });
 
 document.addEventListener("localechange", () => {
-  document.title = `${t("settings.title")} · ${t("app.name")}`;
   applyAccountText();
   if (usersCache.length || els.usersCard.hidden === false) renderUsers(usersCache);
   fillLanguageSelect();
@@ -398,17 +393,18 @@ document.addEventListener("localechange", () => {
   }
 });
 
-async function init() {
-  document.title = `${t("settings.title")} · ${t("app.name")}`;
+/** Called by app.js whenever the settings view is opened; safe to call repeatedly. */
+export async function initSettings() {
   fillLanguageSelect();
   renderToneRow();
   markThemeChoice(storedTheme());
-  watchSystemTheme(() => markThemeChoice(storedTheme()));
+  if (!watchingSystemTheme) {
+    watchingSystemTheme = true;
+    watchSystemTheme(() => markThemeChoice(storedTheme()));
+  }
   try {
     await loadMe();
   } catch (error) {
     showSnackbar(error.message);
   }
 }
-
-void init();

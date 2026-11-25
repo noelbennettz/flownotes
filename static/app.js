@@ -17,7 +17,6 @@ import {
   watchSystemTheme,
 } from "./ui.js";
 import { LOCALES, getLocale, initI18n, localeInfo, setLocale, t } from "./i18n.js";
-import { createEditor } from "./editor.js";
 
 const SAVE_DELAY = 600;
 const SEARCH_DELAY = 150;
@@ -63,6 +62,8 @@ const els = {
   searchDialog: document.getElementById("search-dialog"),
   searchInput: document.getElementById("search-input"),
   searchResults: document.getElementById("search-results"),
+  settingsLink: document.getElementById("btn-settings"),
+  settingsBack: document.getElementById("btn-settings-back"),
 };
 
 const state = {
@@ -122,24 +123,46 @@ function restoreDrawer() {
   }
 }
 
+const SETTINGS_PATH = "/settings";
+
+function currentView() {
+  return window.location.pathname === SETTINGS_PATH ? "settings" : "notes";
+}
+
 function applyDocumentTitle() {
+  if (currentView() === "settings") {
+    document.title = `${t("settings.title")} · ${t("app.name")}`;
+    return;
+  }
   document.title = state.username ? `${state.username} · ${t("app.name")}` : t("app.name");
 }
 
-const editor = createEditor({
-  element: els.editorHost,
-  onChange: (markdown) => {
-    state.pendingMarkdown = markdown;
-    state.dirty = true;
-    setStatus("dirty");
-    scheduleSave();
-  },
-  onUpload: (phase) => {
-    if (phase === "start") setStatus("saving", t("status.saving"));
-    else if (phase === "done") setStatus(state.dirty ? "dirty" : "saved");
-    else setStatus("error", t("toast.imageUploadFailed"));
-  },
-});
+/**
+ * The editor bundle is ~570 kB and only the notes view needs it, so load it when a note is
+ * first opened instead of on every page load (a deep link to /settings never fetches it).
+ */
+let editor = null;
+
+async function ensureEditor() {
+  if (editor) return editor;
+  const { createEditor } = await import("./editor.js");
+  editor = createEditor({
+    element: els.editorHost,
+    onChange: (markdown) => {
+      state.pendingMarkdown = markdown;
+      state.dirty = true;
+      setStatus("dirty");
+      scheduleSave();
+    },
+    onUpload: (phase) => {
+      if (phase === "start") setStatus("saving", t("status.saving"));
+      else if (phase === "done") setStatus(state.dirty ? "dirty" : "saved");
+      else setStatus("error", t("toast.imageUploadFailed"));
+    },
+  });
+  editor.setPlaceholder(t("editor.placeholder"));
+  return editor;
+}
 
 function scheduleSave() {
   window.clearTimeout(state.saveTimer);
@@ -324,7 +347,8 @@ function resetEditorView() {
   state.currentPath = null;
   state.dirty = false;
   state.pendingMarkdown = null;
-  editor.setMarkdown("");
+  // The editor only exists once a note has been opened; never load it just to clear it.
+  if (editor) editor.setMarkdown("");
   els.canvas.classList.remove("has-note");
   renderBreadcrumb(null);
   setStatus("saved");
@@ -340,10 +364,11 @@ async function openNote(path) {
   await flushSave();
   try {
     const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
+    const view = await ensureEditor();
     state.currentPath = path;
     state.dirty = false;
     state.pendingMarkdown = null;
-    editor.setMarkdown(data.content || "");
+    view.setMarkdown(data.content || "");
     els.canvas.classList.add("has-note");
     expandAncestors(path);
     renderBreadcrumb(path);
@@ -352,7 +377,7 @@ async function openNote(path) {
     setStatus("saved");
     localStorage.setItem(scopedKey("last-note"), path);
     if (isMobile()) setDrawer(true);
-    editor.focus();
+    view.focus();
   } catch (error) {
     // A stale "last note" (renamed or deleted elsewhere) must not stick around.
     if (localStorage.getItem(scopedKey("last-note")) === path) {
@@ -720,7 +745,7 @@ function relocalize() {
   els.themeButton.setAttribute("aria-label", t("sidebar.theme"));
   els.languageButton.title = `${t("sidebar.language")} · ${localeInfo().name}`;
   els.languageButton.setAttribute("aria-label", t("sidebar.language"));
-  editor.setPlaceholder(t("editor.placeholder"));
+  if (editor) editor.setPlaceholder(t("editor.placeholder"));
   if (!els.searchDialog.hidden) {
     if (els.searchInput.value.trim()) renderSearchResults(els.searchInput.value);
     else renderSearchHint(t("search.hint"));
@@ -916,6 +941,52 @@ window.matchMedia(MOBILE_QUERY).addEventListener("change", () => {
   if (!isMobile() && els.layout.classList.contains("is-collapsed")) setDrawer(false, { persist: false });
 });
 
+/* ---------- Views and history ---------- */
+
+let settingsModule = null;
+let notesStarted = null;
+
+/** Show the notes or the settings view for the current URL, without reloading the document. */
+async function showView() {
+  const view = currentView();
+  document.documentElement.dataset.view = view;
+  applyDocumentTitle();
+  if (view === "settings") {
+    settingsModule ??= import("./settings.js");
+    const module = await settingsModule;
+    await module.initSettings();
+    return;
+  }
+  void initNotes();
+}
+
+function openSettings() {
+  if (currentView() === "settings") return;
+  if (isMobile()) setDrawer(true, { persist: false });
+  history.pushState({ view: "settings" }, "", SETTINGS_PATH);
+  void showView();
+}
+
+function closeSettings() {
+  if (history.state && history.state.view === "settings") {
+    history.back();
+    return;
+  }
+  // Opened from a bookmark, a reload or a new tab: there is no in-app entry to go back to.
+  history.replaceState(null, "", "/");
+  void showView();
+}
+
+els.settingsLink.addEventListener("click", (event) => {
+  // Middle-click and modifier-clicks keep the plain link behaviour (new tab, new window).
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  openSettings();
+});
+
+els.settingsBack.addEventListener("click", closeSettings);
+window.addEventListener("popstate", () => void showView());
+
 /* ---------- Startup ---------- */
 
 function findFirstNote(nodes) {
@@ -927,11 +998,13 @@ function findFirstNote(nodes) {
   return null;
 }
 
-async function init() {
-  watchSystemTheme();
-  restoreDrawer();
-  relocalize();
+/** Load the tree and the last note once; later visits to the notes view reuse it. */
+function initNotes() {
+  notesStarted ??= startNotes();
+  return notesStarted;
+}
 
+async function startNotes() {
   try {
     const me = await apiJson("/api/me");
     state.username = me.username;
@@ -959,6 +1032,13 @@ async function init() {
     const first = findFirstNote(state.tree);
     if (first) await openNote(first);
   }
+}
+
+async function init() {
+  watchSystemTheme();
+  restoreDrawer();
+  relocalize();
+  await showView();
 }
 
 void init();
