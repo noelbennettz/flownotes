@@ -50,6 +50,13 @@ def connect():
         yield conn
         conn.commit()
     finally:
+        # The index holds note text, so keep it as private as the notes
+        # themselves (0600, including the WAL and shared-memory files).
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                Path(f"{DB_PATH}{suffix}").chmod(0o600)
+            except OSError:
+                pass
         conn.close()
 
 

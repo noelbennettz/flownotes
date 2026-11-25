@@ -13,7 +13,7 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
   is isolated by owner. Administrators create, disable and delete accounts, and reset passwords.
 - **Editor.** Tiptap with Markdown round-tripping: headings, lists, task lists, code blocks,
   quotes, dividers, bold/italic/strikethrough/inline code, images. `/` opens the command menu,
-  `# ` / `- ` / `1. ` / `> ` / ```` ``` ```` / `---` convert as you type, pasted screenshots are
+  `# ` / `- ` / `1. ` / `> ` / ```` ``` ```` followed by a space, and `---` convert as you type, pasted screenshots are
   uploaded automatically, and edits autosave 600 ms after the last keystroke.
 - **Search.** SQLite FTS5 with highlighted excerpts, plus a substring fallback for CJK queries.
 - **Interface.** Material 3 in seven languages (English, Traditional and Simplified Chinese,
@@ -24,7 +24,7 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
 ## Requirements
 
 - Docker with Compose (recommended), or Python 3.11+ for a manual install.
-- A directory for `data/`; the image itself is about 200 MB.
+- A directory for `data/`; the image itself is about 170 MB.
 
 ## Quick start
 
@@ -72,7 +72,7 @@ data/
 ```
 
 Stop the container and copy `data/` for a backup; notes can also be copied while it runs, since
-every write replaces the file atomically. The index is derived data, but it also holds the
+every note write replaces the file atomically (uploads are written in one go). The index is derived data, but it also holds the
 accounts — export the notes before deleting it.
 
 ## Forgot the admin password

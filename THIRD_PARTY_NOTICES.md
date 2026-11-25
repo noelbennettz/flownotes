@@ -6,7 +6,8 @@ been modified, so no notice of changes is due.
 
 Summary of what the container image and the browser bundle carry:
 
-- Python runtime packages: Apache-2.0 ×3, BSD-3-Clause ×7, MIT ×12, PSF-2.0 ×1.
+- Python runtime packages: Apache-2.0 ×2, BSD-3-Clause ×7, MIT ×11, PSF-2.0 ×1 (plus the
+  packaging tools listed separately below).
 - Code inside `static/vendor/editor.bundle.js`: MIT (most), ISC ×1, BSD-2-Clause ×1.
 - Build-only tools: esbuild and the Node image, which are **not** present at runtime.
 - The runtime base image (`python:3.11-slim`) is Debian bookworm plus CPython, with its own

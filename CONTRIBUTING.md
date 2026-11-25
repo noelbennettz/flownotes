@@ -20,7 +20,7 @@ in their spare time, so a focused change with a clear commit message goes a long
 
 ## Requirements
 
-- Python 3.11 or newer. The image pins 3.11; 3.12–3.14 also run the app.
+- Python 3.11 or newer. The image pins 3.11; the test suite has also been run on 3.14.
 - Node.js 20 for `vendor-build/` only. The committed bundle means you do not need Node to
   run the app.
 - Optional: Docker with Compose, `actionlint` for the workflow, a browser for manual checks.
@@ -72,7 +72,7 @@ Two config files pin the style: `pyproject.toml` (black, line length 100) and
 
 ```bash
 python -m black app/                       # pip install black
-npx prettier --write static/*.js app/templates/*.html
+npx prettier@3.4.2 --write static/*.js app/templates/*.html
 ```
 
 `static/vendor/editor.bundle.js` is generated and ignored by `.prettierignore`; `app.css` is

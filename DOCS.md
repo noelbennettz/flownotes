@@ -14,7 +14,7 @@ requests: no CDN, no web fonts, no remote icons.
 ## Requirements
 
 - Docker with Compose (recommended), or Python 3.11+ for a manual install.
-- About 200 MB of disk for the image, plus whatever the notes take.
+- About 170 MB of disk for the image, plus whatever the notes take.
 - A reverse proxy that terminates TLS if the service is not on a trusted LAN.
 
 ## Install
@@ -77,7 +77,8 @@ data/
 └── trash/<account>-<stamp>/   # notes/uploads moved here when an account is deleted
 ```
 
-Notes and image folders are created with mode `0700`. Backups can be as simple as copying
+Notes and image folders are created with mode `0700`; `index.db` (which contains note text
+and must stay as private as the notes) and `.session-secret` are `0600`. Backups can be as simple as copying
 `data/` while the service is stopped, or `rsync` of `data/notes/` at any time — the `.md`
 files are always complete because writes go through a temporary file and `os.replace`.
 
@@ -103,7 +104,8 @@ files are always complete because writes go through a temporary file and `os.rep
 - Tiptap 2 with `tiptap-markdown`; content is stored as Markdown, not HTML. Headings 1–6,
   bullet/ordered/task lists, code blocks, blockquotes, horizontal rules, bold, italic,
   strikethrough, inline code and images round-trip.
-- Input rules convert `# `, `- `, `1. `, `> `, ```` ``` ```` and `---` as you type. `/` opens the
+- Input rules convert `# `, `- `, `1. `, `> `, `---` and ```` ``` ```` followed by a space as
+  you type. `/` opens the
   command menu (also reachable with the keyboard: arrows, Enter, Esc); `/image` opens a file
   picker and uploads the picture.
 - Pasting an image uploads it to `data/uploads/<account>/` and inserts
@@ -122,12 +124,13 @@ setup pages too. Themes (`flownotes:theme`: light, dark, system) and accent tone
 
 Layout uses logical CSS properties, so `dir="rtl"` mirrors the drawer, tree indentation, the
 breadcrumb and the floating controls. On screens narrower than 900 px the drawer becomes an
-overlay with a scrim, tree actions are always visible (no hover on touch) and rows grow to
-44 px.
+overlay with a scrim. On pointers without hover (`@media (hover: none)`, i.e. touch) the tree
+actions are always visible and rows grow to 44 px, whatever the window width.
 
 ## API
 
-All `/api/*` routes except `/api/login` and `/api/setup*` require the session cookie. Payloads
+All `/api/*` routes except `/api/login`, `/api/logout` and `/api/setup*` require the session
+cookie. Payloads
 are JSON; errors are `{"detail": "…"}` with a matching status code.
 
 | Method | Path | Body / query | Notes |
@@ -145,18 +148,19 @@ are JSON; errors are `{"detail": "…"}` with a matching status code.
 | DELETE | `/api/note` | `?path=` | File or folder (recursive) |
 | POST | `/api/folder` | `{path}` | Creates nested folders |
 | POST | `/api/rename` | `{old_path, new_path}` | Rename and/or move; `409` on collision |
-| POST | `/api/upload` | multipart `file` | PNG/JPEG/GIF/WebP/AVIF, 20 MB; `{url}` |
+| POST | `/api/upload` | multipart `file` | PNG/JPEG/GIF/WebP/AVIF, 20 MB; `{url, filename}` |
 | GET | `/api/search` | `?q=` | Up to 20 `{path, title, snippet}` |
 | POST | `/api/resync` | — | `{updated, removed}` |
-| GET | `/api/export` | — | ZIP of the account's notes |
+| GET | `/api/export` | — | ZIP of the account's notes (images are not included) |
 | GET | `/api/admin/users` | — | Administrators only |
 | POST | `/api/admin/users` | `{username, password, is_admin}` | Administrators only |
 | PATCH | `/api/admin/users/{name}` | `{password?, is_admin?, disabled?}` | Administrators only |
 | DELETE | `/api/admin/users/{name}` | — | Moves the account's files to `data/trash/` |
 
-Uploads are served from `/uploads/<account>/<file>` and require a session; administrators may
-read any account's images. Legacy `/uploads/<file>` links (from the single-user layout) still
-resolve.
+Uploads are served from `/uploads/<account>/<file>` and require a session; only the owner or an
+administrator may read them. Legacy `/uploads/<file>` links (from the single-user layout) have no
+owner on disk, so any signed-in account can read them — move them into an account folder (and
+rewrite the links) if that matters for your deployment.
 
 ## Operations
 
