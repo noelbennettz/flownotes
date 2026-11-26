@@ -251,6 +251,8 @@ function applySaveResult(path, sent, data) {
     state.currentPath = copy || path;
     state.version = copy ? (data.conflict_copy_version ?? null) : (data.version ?? null);
     state.baseMarkdown = sent;
+    // A keepalive write for the original path must not be confirmed against this copy later.
+    state.pendingWrite = null;
     localStorage.setItem(scopedKey("last-note"), state.currentPath);
     expandAncestors(state.currentPath);
     renderBreadcrumb(state.currentPath);
