@@ -1160,6 +1160,23 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("focus", () => void syncOpenNote());
 
+/**
+ * A page restored from the back/forward cache keeps the DOM it had when it was left, and that
+ * DOM is not always the view its URL asks for: open Settings, reload, then press Back and the
+ * "/" entry comes back with the settings panel painted (its three password fields) while the
+ * notes layout stays hidden. A bfcache restore fires pageshow but not popstate, so re-apply the
+ * view whenever the two disagree. Normal loads already ran showView() from init().
+ */
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  if (document.documentElement.dataset.view === currentView()) {
+    // Same view, but the note may have been edited elsewhere while this page was frozen.
+    if (currentView() === "notes") void syncOpenNote();
+    return;
+  }
+  void showView();
+});
+
 window.matchMedia(MOBILE_QUERY).addEventListener("change", () => {
   if (!isMobile() && els.layout.classList.contains("is-collapsed")) setDrawer(false, { persist: false });
 });

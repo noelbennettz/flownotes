@@ -1116,19 +1116,6 @@ kbd {
 
 .snackbar__action:hover { background: rgba(255, 255, 255, 0.08); }
 
-/* ---------- Settings page ---------- */
-
-/* ---------- Settings view (same document as the notes) ---------- */
-
-#settings-view {
-  display: none;
-  height: 100vh;
-  height: 100dvh;
-}
-
-html[data-view="settings"] #settings-view { display: flex; }
-html[data-view="settings"] .layout { display: none; }
-
 /* ---------- Settings view (same document as the notes) ---------- */
 
 #settings-view {
