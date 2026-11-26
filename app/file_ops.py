@@ -14,6 +14,8 @@ import re
 import shutil
 import tempfile
 import threading
+from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 
 DATA_DIR = Path(
@@ -25,6 +27,11 @@ UPLOADS_ROOT = DATA_DIR / "uploads"
 NOTE_SUFFIX = ".md"
 MAX_NAME_BYTES = 255
 MAX_PATH_CHARS = 1024
+
+# Automatic merging is line-based. SequenceMatcher is quadratic in the worst case, and the
+# request runs in a worker thread, so very large notes fall back to keeping both versions.
+MERGE_BYTE_LIMIT = 2 * 1024 * 1024
+MERGE_LINE_LIMIT = 20000
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -305,6 +312,223 @@ def write_note(
             except OSError:
                 pass
     return normalized, version
+
+
+def _changes(base: list[str], other: list[str]) -> list[tuple[int, int, list[str]]]:
+    """Edits that turn *base* into *other*: (start, end, text); insertions have start == end."""
+    changes: list[tuple[int, int, list[str]]] = []
+    matcher = SequenceMatcher(None, base, other, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changes.append((i1, i2, other[j1:j2]))
+    return changes
+
+
+def merge_notes(base: str, mine: str, theirs: str) -> str | None:
+    """Line-based three-way merge; None means both sides changed the same lines differently.
+
+    Edits in different places (the common “laptop edits the top, phone edits the bottom” case),
+    identical edits and deletions merge cleanly. Two devices appending different text at the
+    same spot counts as a conflict, because choosing an order for them would be a guess.
+    Line endings, BOMs and a missing final newline are preserved: everything is compared as
+    lines with their terminators kept.
+    """
+    if max(len(base), len(mine), len(theirs)) > MERGE_BYTE_LIMIT:
+        return None
+    base_lines = base.splitlines(keepends=True)
+    mine_lines = mine.splitlines(keepends=True)
+    theirs_lines = theirs.splitlines(keepends=True)
+    if max(len(base_lines), len(mine_lines), len(theirs_lines)) > MERGE_LINE_LIMIT:
+        return None
+
+    mine_changes = _changes(base_lines, mine_lines)
+    theirs_changes = _changes(base_lines, theirs_lines)
+    merged: list[str] = []
+    pos = mi = ti = 0
+    total = len(base_lines)
+
+    while pos <= total:
+        m_next = mine_changes[mi] if mi < len(mine_changes) else None
+        t_next = theirs_changes[ti] if ti < len(theirs_changes) else None
+
+        starts = [change[0] for change in (m_next, t_next) if change is not None]
+        if starts and pos < min(starts):
+            # Copy the base lines both sides left alone.
+            stop = min(starts)
+            merged.extend(base_lines[pos:stop])
+            pos = stop
+            continue
+
+        if m_next is not None and t_next is not None:
+            m_start, m_end, m_text = m_next
+            t_start, t_end, t_text = t_next
+            if m_start == t_start:
+                if m_text == t_text:
+                    merged.extend(m_text)
+                    pos = max(m_end, t_end)
+                    mi += 1
+                    ti += 1
+                    continue
+                return None
+            if m_start < t_start:
+                if m_end > t_start:
+                    return None
+                merged.extend(m_text)
+                pos = m_end
+                mi += 1
+                continue
+            if t_end > m_start:
+                return None
+            merged.extend(t_text)
+            pos = t_end
+            ti += 1
+            continue
+
+        if m_next is not None:
+            merged.extend(m_next[2])
+            pos = m_next[1]
+            mi += 1
+            continue
+        if t_next is not None:
+            merged.extend(t_next[2])
+            pos = t_next[1]
+            ti += 1
+            continue
+
+        merged.extend(base_lines[pos:])
+        break
+
+    return "".join(merged)
+
+
+def _conflict_name(name: str, stamp: str, counter: int) -> str:
+    """Sibling name for a kept copy, kept inside the 255-byte component limit."""
+    stem = name[: -len(NOTE_SUFFIX)] if name.endswith(NOTE_SUFFIX) else name
+    suffix = f" (conflict {stamp})" + (f"-{counter}" if counter > 1 else "")
+    budget = MAX_NAME_BYTES - len(f"{suffix}{NOTE_SUFFIX}".encode("utf-8"))
+    stem = stem.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+    return f"{stem}{suffix}{NOTE_SUFFIX}"
+
+
+def _write_conflict_copy(root: Path, normalized: str, content: str) -> tuple[str, str]:
+    """Store one side of a concurrent edit as a sibling note; never replaces an existing file."""
+    parent, _, name = normalized.rpartition("/")
+    stamp = f"{datetime.now():%Y-%m-%d %H-%M-%S}"
+    last_error: Exception | None = None
+    for counter in range(1, 101):
+        candidate = _conflict_name(name, stamp, counter)
+        if parent:
+            candidate = f"{parent}/{candidate}"
+        try:
+            return write_note(root, candidate, content, create_only=True)
+        except FileExistsError as exc:
+            last_error = exc
+    raise FileExistsError("Could not find a free name for the conflict copy") from last_error
+
+
+def _replace_atomically(path: Path, data: bytes) -> None:
+    tmp_name = _write_temp(path, data)
+    try:
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+
+def merge_save(
+    root: Path,
+    rel_path: str,
+    content: str,
+    *,
+    base_version: str,
+    base_content: str,
+) -> dict:
+    """Save with automatic three-way merge when the file moved on since the client read it.
+
+    ``base_content`` is the text the client last read. When it hashes to ``base_version`` the
+    server can merge safely; when it does not (a stale or lossy copy, e.g. a file that is not
+    valid UTF-8) merging would be a guess, so both versions are kept instead of overwriting.
+    Everything happens under the write lock, so no third writer can slip between the compare
+    and the replace.
+
+    Returns the note's new state. When both sides touched the same lines, the caller's text is
+    kept as a sibling “(conflict …)” note instead of being discarded, and the note itself keeps
+    the version that was already on disk. ``missing`` means the note was renamed or deleted
+    before this save landed; the text is kept as a copy so nothing is lost.
+    """
+    normalized = normalize_note_path(rel_path)
+    path = resolve_safe_path(normalized, root=root)
+    mine = content.encode("utf-8")
+    # The base text is only trusted for merging when it hashes to the version the client quotes.
+    base_is_verified = hashlib.sha256(base_content.encode("utf-8")).hexdigest() == base_version
+
+    with _WRITE_LOCK:
+        if not path.is_file():
+            copy_rel, copy_version = _write_conflict_copy(root, normalized, content)
+            return {
+                "path": normalized,
+                "version": None,
+                "content": content,
+                "merged": False,
+                "missing": True,
+                "conflict_copy": copy_rel,
+                "conflict_copy_version": copy_version,
+            }
+
+        current = path.read_bytes()
+        current_version = hashlib.sha256(current).hexdigest()
+        if current_version == base_version:
+            # Nobody else wrote in the meantime; keep the plain save path.
+            _replace_atomically(path, mine)
+            return {
+                "path": normalized,
+                "version": hashlib.sha256(mine).hexdigest(),
+                "content": content,
+                "merged": False,
+                "missing": False,
+            }
+
+        try:
+            theirs = current.decode("utf-8")
+        except UnicodeDecodeError:
+            # Never rewrite a file we cannot round-trip; keep both versions instead.
+            theirs = None
+
+        merged_text = (
+            merge_notes(base_content, content, theirs)
+            if base_is_verified and theirs is not None
+            else None
+        )
+        if merged_text is None:
+            copy_rel, copy_version = _write_conflict_copy(root, normalized, content)
+            return {
+                "path": normalized,
+                "version": current_version,
+                "content": (
+                    theirs if theirs is not None else current.decode("utf-8", errors="replace")
+                ),
+                "merged": False,
+                "missing": False,
+                "conflict_copy": copy_rel,
+                "conflict_copy_version": copy_version,
+            }
+
+        merged_bytes = merged_text.encode("utf-8")
+        merged_version = hashlib.sha256(merged_bytes).hexdigest()
+        if merged_version != current_version:
+            # Identical edits on both devices already produced this text; skip the write so the
+            # file (and its mtime, which drives the index) does not churn for nothing.
+            _replace_atomically(path, merged_bytes)
+        return {
+            "path": normalized,
+            "version": merged_version,
+            "content": merged_text,
+            "merged": True,
+            "missing": False,
+        }
 
 
 def create_folder(root: Path, rel_path: str) -> str:

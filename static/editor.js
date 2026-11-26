@@ -143,6 +143,27 @@ const MENU_WIDTH = 216;
 const MENU_MARGIN = 12;
 
 /**
+ * Markdown out of the editor.
+ *
+ * The Markdown extension is configured with `breaks: true` so a plain newline in a note stays a
+ * newline instead of being joined into one paragraph the first time anyone types in it. The
+ * serialiser writes those line breaks as a backslash before the newline, which is noise in a
+ * plain-text note (and would make a concurrent edit look like a whole-file change), so the
+ * backslash is dropped again — except inside fenced code blocks, where it is content. The
+ * result always ends with a newline so it compares line-for-line with the stored file.
+ */
+function normaliseMarkdown(markdown) {
+  const lines = markdown.split("\n");
+  let inFence = false;
+  const cleaned = lines.map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    return !inFence && line.endsWith("\\") ? line.slice(0, -1) : line;
+  });
+  const text = cleaned.join("\n");
+  return text.trim() ? `${text.replace(/\n*$/, "")}\n` : "";
+}
+
+/**
  * @param {object} options
  * @param {HTMLElement} options.element container element
  * @param {(markdown: string) => void} [options.onChange] called on every content change (programmatic loads excluded)
@@ -320,7 +341,7 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
       Markdown.configure({
         html: false,
         tightLists: true,
-        breaks: false,
+        breaks: true,
         linkify: false,
         transformPastedText: true,
         transformCopiedText: true,
@@ -335,7 +356,7 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
     onUpdate: () => {
       syncSlashMenu();
       if (applyingExternal) return;
-      onChange(editor.storage.markdown.getMarkdown());
+      onChange(normaliseMarkdown(editor.storage.markdown.getMarkdown()));
     },
     onBlur: () => closeMenu(),
   });
@@ -354,7 +375,9 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
   };
   document.addEventListener("mousedown", handleDocumentMouseDown);
 
-  const setMarkdown = (markdown) => {
+  const setMarkdown = (markdown, { restoreSelection = false } = {}) => {
+    // Reloading a note whose text was merged elsewhere should not send the caret home.
+    const anchor = restoreSelection ? editor.state.selection.from : null;
     applyingExternal = true;
     try {
       if (markdown && markdown.trim()) {
@@ -365,6 +388,9 @@ export function createEditor({ element, onChange = () => {}, onUpload = () => {}
       }
     } finally {
       applyingExternal = false;
+    }
+    if (anchor !== null) {
+      editor.commands.setTextSelection(Math.min(anchor, editor.state.doc.content.size));
     }
     closeMenu();
   };

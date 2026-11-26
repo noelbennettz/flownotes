@@ -170,7 +170,7 @@ cookie. Payloads are JSON; errors are `{"detail": "…"}` with a matching status
 | GET | `/api/note` | `?path=` | `{path, content, version}` |
 | GET | `/api/note/meta` | `?path=` | `{path, version, mtime, size}`; no body |
 | POST | `/api/note` | `{path, content}` | Creates; `409` if it exists |
-| PUT | `/api/note` | `{path, content, base_version?}` | Updates; `409` when `base_version` is stale, `404` if missing |
+| PUT | `/api/note` | `{path, content, base_version?, base_content?}` | Updates; merges when `base_version` is stale, `409` without `base_content`, `404` if missing |
 | DELETE | `/api/note` | `?path=` | File or folder (recursive) |
 | POST | `/api/folder` | `{path}` | Creates nested folders |
 | POST | `/api/rename` | `{old_path, new_path}` | Rename and/or move; `409` on collision |
@@ -190,16 +190,29 @@ rewrite the links) if that matters for your deployment.
 
 ### Concurrent edits
 
-`GET /api/note` returns a content-hash `version`. The browser sends it back as `base_version` on
-every save (`PUT`, and the keepalive write when the tab closes); if the file changed in the
-meantime — another device, another tab, or an SSH edit picked up by the index — the write is
-refused with `409` (current version in `X-Note-Version`). The client then keeps this device's text
-and saves it over the other version without asking; that is the default “Keep this device's edits”
-switch under Settings → Editing (`localStorage["flownotes:conflict"]` is `mine`). With the switch
-off (`ask`) it opens a dialog instead, so you can load the other version or keep your own. Omitting
-`base_version` forces the write, which is what “keep mine” and older clients do. Returning to a tab
-also re-checks `/api/note/meta`, so an idle note picks up edits made elsewhere; a note that was
-renamed or deleted elsewhere is cleared instead of being saved into nothing.
+`GET /api/note` returns a content-hash `version`. The browser sends it back as `base_version`
+together with the text it last saw as `base_content`; the hash of `base_content` is compared with
+`base_version` to verify the base, and the save happens atomically under the write lock. If the
+file changed in the meantime — another device, another tab, or an SSH edit picked up by the index
+— the server performs a line-based three-way merge of base, stored text and the incoming text.
+Edits in different places are combined and the merged text is written; both devices keep working.
+Two devices changing the same lines differently cannot be merged, so the note keeps the version
+that was already on disk and the incoming text is saved next to it as
+`Name (conflict YYYY-MM-DD HH-MM-SS).md`; nothing is discarded and both notes appear in the tree,
+search and export. The same copy is made when the note was renamed or deleted before the save
+landed, or when the base cannot be verified (a stale or lossy copy, e.g. a file that is not valid
+UTF-8) — merging on an unverified base would be a guess.
+
+A save without `base_content` (older clients, API calls, and the tab-close keepalive write, whose
+64 KiB body limit cannot carry a second copy of the text) still gets `409` with the current
+version in `X-Note-Version`; returning to the tab then adopts the stored text as the merge base
+and saves on top of it. The response also carries `sent_version`, the hash of the submitted text:
+a client that kept typing while the save was in flight uses it as the next `base_version`, so
+those keystrokes are merged on top of the stored result instead of overwriting it. Omitting
+`base_version` forces the write, which is available to API callers but no longer used by the
+browser. Returning to a tab also re-checks `/api/note/meta`, so an idle note picks up edits made
+elsewhere; a note that was renamed or deleted elsewhere is cleared instead of being saved into
+nothing (unless there were unsaved edits, which become a conflict copy).
 
 “Sign out everywhere” in Settings calls `/api/me/logout-all`, which bumps `token_version`: every
 cookie for the account stops working, including the one in the current browser.

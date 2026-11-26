@@ -7,6 +7,7 @@ SQLite is only a rebuildable index.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import os
 import secrets
@@ -863,6 +864,9 @@ class NotePayload(BaseModel):
     content: str = ""
     # The version the client read; omit to force the write (explicit "keep mine").
     base_version: str | None = None
+    # The text that went with base_version. When present, a version mismatch is merged instead
+    # of refused, so edits made on two devices both survive.
+    base_content: str | None = None
 
 
 class FolderPayload(BaseModel):
@@ -930,17 +934,60 @@ def api_create_note(payload: NotePayload, user: users.User = Depends(require_use
 def api_update_note(payload: NotePayload, user: users.User = Depends(require_user)):
     root = file_ops.user_root(user.username)
     try:
-        saved, version = file_ops.write_note(
-            root,
-            payload.path,
-            payload.content,
-            base_version=payload.base_version,
-            must_exist=True,
-        )
+        if payload.base_version is not None and payload.base_content is not None:
+            # Concurrent edits: merge both sides instead of letting the last save win.
+            result = file_ops.merge_save(
+                root,
+                payload.path,
+                payload.content,
+                base_version=payload.base_version,
+                base_content=payload.base_content,
+            )
+        else:
+            # Older clients, API callers and the tab-close keepalive (which cannot carry a
+            # second copy of the text because of the 64 KiB keepalive limit) use the plain
+            # optimistic check and keep the conflict response.
+            saved, version = file_ops.write_note(
+                root,
+                payload.path,
+                payload.content,
+                base_version=payload.base_version,
+                must_exist=True,
+            )
+            result = {
+                "path": saved,
+                "version": version,
+                "content": payload.content,
+                "merged": False,
+                "missing": False,
+            }
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
-    database.upsert_note_index(user.username, saved, None, payload.content)
-    return {"ok": True, "path": saved, "version": version}
+
+    if result.get("missing"):
+        # The note is gone (renamed or deleted elsewhere); the text lives on in the copy.
+        database.delete_note_index(user.username, result["path"])
+    else:
+        database.upsert_note_index(user.username, result["path"], None, result["content"])
+    if result.get("conflict_copy"):
+        database.upsert_note_index(user.username, result["conflict_copy"], None, payload.content)
+
+    response = {"ok": True, "path": result["path"], "version": result["version"]}
+    response["merged"] = result["merged"]
+    # The hash of the content this request carried. A client that kept typing while the save
+    # was in flight quotes it as base_version next time, so those keystrokes merge on top of
+    # whatever the server now holds instead of overwriting it.
+    response["sent_version"] = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
+    if result.get("missing"):
+        response["missing"] = True
+    if result.get("conflict_copy"):
+        response["conflict_copy"] = result["conflict_copy"]
+        response["conflict_copy_version"] = result["conflict_copy_version"]
+    if result["merged"] or result.get("missing"):
+        # The editor has to show the merged text (or move to the kept copy); a plain save
+        # already knows its own content, so it is not echoed back.
+        response["content"] = result["content"]
+    return response
 
 
 @api.delete("/note")

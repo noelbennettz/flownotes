@@ -5,13 +5,11 @@
 import {
   apiFetch,
   apiJson,
-  applyConflictPolicy,
   applyTheme,
   applyTone,
   askText,
   confirmAction,
   showSnackbar,
-  storedConflictPolicy,
   storedTheme,
   storedTone,
   TONES,
@@ -42,7 +40,6 @@ const els = {
   themeSegmented: document.getElementById("theme-segmented"),
   languageSelect: document.getElementById("language-select"),
   toneRow: document.getElementById("tone-row"),
-  conflictSwitch: document.getElementById("conflict-keep-mine"),
   usersCard: document.getElementById("users-card"),
   userList: document.getElementById("user-list"),
   addUser: document.getElementById("btn-add-user"),
@@ -384,11 +381,6 @@ els.languageSelect.addEventListener("change", () => {
   setLocale(els.languageSelect.value);
 });
 
-els.conflictSwitch.addEventListener("change", () => {
-  applyConflictPolicy(els.conflictSwitch.checked ? "mine" : "ask");
-  els.conflictSwitch.setAttribute("aria-checked", String(els.conflictSwitch.checked));
-});
-
 els.exportButton.addEventListener("click", () => {
   window.location.href = "/api/export";
 });
@@ -442,8 +434,6 @@ document.addEventListener("localechange", () => {
 export async function initSettings() {
   fillLanguageSelect();
   renderToneRow();
-  els.conflictSwitch.checked = storedConflictPolicy() === "mine";
-  els.conflictSwitch.setAttribute("aria-checked", String(els.conflictSwitch.checked));
   markThemeChoice(storedTheme());
   if (!watchingSystemTheme) {
     watchingSystemTheme = true;

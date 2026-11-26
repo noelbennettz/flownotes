@@ -11,7 +11,6 @@ import {
   confirmAction,
   showMenu,
   showSnackbar,
-  storedConflictPolicy,
   storedTheme,
   storedTone,
   toggleExplicitTheme,
@@ -27,7 +26,6 @@ const STATUS_KEYS = {
   saved: "status.saved",
   saving: "status.saving",
   dirty: "status.dirty",
-  conflict: "status.conflict",
   error: "status.error",
 };
 
@@ -66,10 +64,6 @@ const els = {
   searchResults: document.getElementById("search-results"),
   settingsLink: document.getElementById("btn-settings"),
   settingsBack: document.getElementById("btn-settings-back"),
-  conflictDialog: document.getElementById("conflict-dialog"),
-  conflictBody: document.getElementById("conflict-body"),
-  conflictReload: document.getElementById("conflict-reload"),
-  conflictOverwrite: document.getElementById("conflict-overwrite"),
 };
 
 const state = {
@@ -77,8 +71,10 @@ const state = {
   tree: [],
   currentPath: null,
   version: null,
+  // The text this device last read from (or wrote to) the server. It is sent back as
+  // base_content so a save that lost the race is merged instead of overwriting the other side.
+  baseMarkdown: null,
   dirty: false,
-  conflict: false,
   saveTimer: null,
   searchTimer: null,
   searchResults: [],
@@ -181,6 +177,10 @@ function scheduleSave() {
   }, SAVE_DELAY);
 }
 
+// Only one save may be in flight: a second request quoting the same base would race the first
+// and turn an ordinary merge into a conflict copy. Later edits wait for it and are merged next.
+let saveInFlight = null;
+
 async function flushSave() {
   window.clearTimeout(state.saveTimer);
   state.saveTimer = null;
@@ -188,125 +188,115 @@ async function flushSave() {
     state.pendingWrite = null;
     return true;
   }
-  // A conflict is waiting on the user; do not overwrite the other device's text.
-  if (state.conflict) return false;
+
+  if (saveInFlight) {
+    const previous = await saveInFlight.catch(() => false);
+    if (!previous) return false;
+    if (state.currentPath === null) return true;
+    return flushSave();
+  }
 
   const path = state.currentPath;
   if (state.pendingWrite?.path === path) {
     // A keepalive flush may already have stored the text it sent; its response was unreadable.
-    // Confirm that write first so this save quotes the right version.
-    const pending = state.pendingWrite;
-    const confirmed = await confirmPendingWrite(path);
-    if (state.currentPath !== path || state.conflict) return false;
-    if (confirmed && state.pendingMarkdown === pending.content) {
-      state.dirty = false;
-      setStatus("saved");
-      return true;
-    }
+    // Settle it first so this save quotes the right base.
+    await confirmPendingWrite(path);
+    if (state.currentPath !== path) return false;
+    if (!state.dirty) return true;
   }
+
   const content = state.pendingMarkdown;
   if (content === null) return true;
   setStatus("saving");
-  try {
-    const data = await apiJson("/api/note", {
-      method: "PUT",
-      body: { path, content, base_version: state.version },
-    });
-    if (state.currentPath === path && state.pendingMarkdown === content) {
-      state.dirty = false;
-      state.version = data.version ?? null;
-      setStatus("saved");
-    } else if (state.currentPath === path) {
-      // More keystrokes arrived while saving; stay dirty for the next tick.
-      state.version = data.version ?? state.version;
-      setStatus("dirty");
-    }
-    return true;
-  } catch (error) {
-    if (state.currentPath !== path) return false;
-    if (error.status === 409) {
-      // Settings → Editing decides whether this device's text wins silently or the dialog opens.
-      if (storedConflictPolicy() === "mine") return overwriteWithMine({ automatic: true });
-      openConflictDialog();
+  // base_content lets the server merge when another device saved between our read and this
+  // write; without it a mismatch is a plain 409.
+  const body = { path, content, base_version: state.version };
+  if (typeof state.baseMarkdown === "string") body.base_content = state.baseMarkdown;
+
+  saveInFlight = (async () => {
+    try {
+      const data = await apiJson("/api/note", { method: "PUT", body });
+      applySaveResult(path, content, data);
+      return true;
+    } catch (error) {
+      if (state.currentPath !== path) return false;
+      if (error.status === 404) {
+        // Renamed or deleted on another device: drop the stale entry from the tree.
+        void refreshTree().catch(() => {});
+      }
+      setStatus("error", error.message || t("status.error"));
       return false;
     }
-    if (error.status === 404) {
-      // Renamed or deleted on another device: drop the stale entry from the tree.
-      void refreshTree().catch(() => {});
-    }
-    setStatus("error", error.message || t("status.error"));
-    return false;
+  })();
+  try {
+    return await saveInFlight;
+  } finally {
+    saveInFlight = null;
   }
 }
 
 /* ---------- Concurrent edits ---------- */
 
-/** Another device saved this note first; the user picks which text survives. */
-function openConflictDialog() {
-  state.conflict = true;
-  setStatus("conflict");
-  if (!els.conflictDialog) return;
-  els.conflictBody.textContent = t("conflict.body", { path: displayName(state.currentPath || "") });
-  els.conflictDialog.hidden = false;
-  els.conflictReload.focus();
-}
-
-function closeConflictDialog() {
-  if (els.conflictDialog) els.conflictDialog.hidden = true;
-}
-
-async function reloadFromServer() {
-  const path = state.currentPath;
-  closeConflictDialog();
-  if (!path) return;
-  try {
-    const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
-    const view = await ensureEditor();
-    state.version = data.version ?? null;
-    state.pendingMarkdown = null;
-    state.pendingWrite = null;
-    state.dirty = false;
-    state.conflict = false;
-    view.setMarkdown(data.content || "");
-    setStatus("saved");
-    showSnackbar(t("toast.reloadedFromServer"));
-  } catch (error) {
-    state.conflict = false;
-    showSnackbar(error.message || t("toast.readFailed"));
-    await refreshTree().catch(() => {});
-  }
-}
-
 /**
- * Save this device's text over the version stored elsewhere. Called from the conflict dialog, or
- * directly when Settings → Editing says this device's edits win without asking.
+ * Apply the server's answer to a save. Three shapes matter: a note that vanished before the
+ * write landed (the text was kept as a new note), a merge that could not place both edits
+ * (both texts survive, this device's in a “(conflict …)” copy), and a clean merge whose text
+ * has to replace what the editor is showing.
  */
-async function overwriteWithMine({ automatic = false } = {}) {
-  const path = state.currentPath;
-  const content = state.pendingMarkdown;
-  closeConflictDialog();
-  if (!path || content === null) return false;
-  try {
-    // No base_version: an explicit "keep my text".
-    const data = await apiJson("/api/note", { method: "PUT", body: { path, content } });
-    if (state.currentPath !== path) return true;
-    state.version = data.version ?? null;
-    state.pendingWrite = null;
-    state.conflict = false;
-    if (state.pendingMarkdown === content) {
+function applySaveResult(path, sent, data) {
+  const copy = data.conflict_copy;
+  if (data.missing || copy) {
+    // Follow this device's text to the note that now holds it, so the editor and the file stay
+    // in sync; the original keeps whatever the other device saved.
+    state.currentPath = copy || path;
+    state.version = copy ? (data.conflict_copy_version ?? null) : (data.version ?? null);
+    state.baseMarkdown = sent;
+    localStorage.setItem(scopedKey("last-note"), state.currentPath);
+    expandAncestors(state.currentPath);
+    renderBreadcrumb(state.currentPath);
+    void refreshTree().catch(() => {});
+    if (state.pendingMarkdown !== sent) {
+      // Keystrokes arrived while saving: keep them and write them into the copy next tick.
+      state.dirty = true;
+      setStatus("dirty");
+      scheduleSave();
+    } else {
+      state.pendingMarkdown = sent;
       state.dirty = false;
       setStatus("saved");
-    } else {
-      // More keystrokes arrived while saving; stay dirty for the next tick.
-      setStatus("dirty");
     }
-    showSnackbar(t(automatic ? "toast.keptMine" : "toast.overwrote"));
-    return true;
-  } catch (error) {
-    state.conflict = false;
-    setStatus("error", error.message || t("status.error"));
-    return false;
+    const message = data.missing
+      ? t("toast.savedAsCopy", { path: copy })
+      : t("toast.keptBoth", { path: copy });
+    showSnackbar(message, {
+      // A renamed or deleted original has nothing left to open; the copy is what matters.
+      actionLabel: data.missing ? undefined : t("toast.openOriginal"),
+      onAction: data.missing ? undefined : () => void openNote(path),
+      timeout: 8000,
+    });
+    return;
   }
+
+  const mergedText = typeof data.content === "string" ? data.content : sent;
+  if (state.pendingMarkdown !== sent) {
+    // Keystrokes arrived while saving. Quote exactly the text this save carried, so the next
+    // tick merges those keystrokes on top of whatever the server now holds instead of writing
+    // this device's older text over the merge.
+    state.baseMarkdown = sent;
+    state.version = data.sent_version ?? state.version;
+    setStatus("dirty");
+    scheduleSave();
+    return;
+  }
+  state.version = data.version ?? state.version;
+  state.baseMarkdown = mergedText;
+  state.pendingMarkdown = mergedText;
+  state.dirty = false;
+  setStatus("saved");
+  if (mergedText !== sent && editor) {
+    editor.setMarkdown(mergedText, { restoreSelection: true });
+  }
+  if (data.merged) showSnackbar(t("toast.merged"));
 }
 
 /** Coming back to the tab: pick up edits saved elsewhere while this note was idle. */
@@ -314,9 +304,10 @@ let lastMetaCheck = 0;
 
 /**
  * The response of the keepalive PUT sent while the tab was hidden cannot be read, so its
- * outcome is unknown. If the stored note already holds that exact text the write was ours:
- * adopt the server's version silently instead of reporting another device's edit. Returns
- * true when the content is confirmed on the server.
+ * outcome is unknown. Whatever the file now holds becomes this device's merge base; if the
+ * stored text is exactly what was sent, the save is simply done. A keepalive write that the
+ * server merged with another device's edits arrives here as different text, and showing it
+ * keeps the editor from re-saving a stale version over the merge.
  */
 async function confirmPendingWrite(path) {
   const pending = state.pendingWrite;
@@ -324,8 +315,21 @@ async function confirmPendingWrite(path) {
   state.pendingWrite = null;
   try {
     const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
-    if (data.content !== pending.content) return false;
+    if (state.currentPath !== path) return false;
+    const stored = data.content ?? "";
     state.version = data.version ?? null;
+    state.baseMarkdown = stored;
+    if (state.pendingMarkdown !== pending.content) {
+      // Newer keystrokes are waiting; they will merge against the stored text on the next tick.
+      return false;
+    }
+    state.pendingMarkdown = stored;
+    state.dirty = false;
+    setStatus("saved");
+    if (stored !== pending.content) {
+      editor?.setMarkdown(stored, { restoreSelection: true });
+      showSnackbar(t("toast.merged"));
+    }
     return true;
   } catch (error) {
     return false;
@@ -335,7 +339,7 @@ async function confirmPendingWrite(path) {
 async function syncOpenNote() {
   if (document.visibilityState !== "visible") return;
   const path = state.currentPath;
-  if (!path || state.conflict) return;
+  if (!path) return;
 
   // A pending keepalive write is the likely reason the version looks stale; settle it (or
   // save newer text on top) before treating any difference as an edit from another device.
@@ -344,7 +348,7 @@ async function syncOpenNote() {
       state.pendingWrite = null;
     } else {
       await flushSave();
-      if (state.currentPath !== path || state.dirty || state.conflict) return;
+      if (state.currentPath !== path || state.dirty) return;
     }
   }
 
@@ -353,14 +357,15 @@ async function syncOpenNote() {
   lastMetaCheck = Date.now();
   try {
     const meta = await apiJson(`/api/note/meta?path=${encodeURIComponent(path)}`);
-    if (state.currentPath !== path || state.dirty || state.conflict) return;
+    if (state.currentPath !== path || state.dirty) return;
     if (!meta.version || meta.version === state.version) return;
     const data = await apiJson(`/api/note?path=${encodeURIComponent(path)}`);
     if (state.currentPath !== path || state.dirty) return;
     const view = await ensureEditor();
     state.version = data.version ?? null;
+    state.baseMarkdown = data.content ?? "";
     state.pendingMarkdown = null;
-    view.setMarkdown(data.content || "");
+    view.setMarkdown(data.content || "", { restoreSelection: true });
     setStatus("saved");
     showSnackbar(t("toast.reloadedFromServer"));
   } catch (error) {
@@ -381,7 +386,6 @@ async function syncOpenNote() {
 /** Send pending edits when the tab is closed or hidden (keepalive fetch). */
 function flushOnLeave() {
   if (!state.dirty || !state.currentPath || state.pendingMarkdown === null) return;
-  if (state.conflict) return;
   const path = state.currentPath;
   const content = state.pendingMarkdown;
   if (state.pendingWrite?.path === path && state.pendingWrite.content === content) return;
@@ -539,8 +543,8 @@ function renderBreadcrumb(path) {
 function resetEditorView() {
   state.currentPath = null;
   state.version = null;
+  state.baseMarkdown = null;
   state.dirty = false;
-  state.conflict = false;
   state.pendingMarkdown = null;
   state.pendingWrite = null;
   // The editor only exists once a note has been opened; never load it just to clear it.
@@ -560,7 +564,7 @@ async function openNote(path) {
     return;
   }
   if (!(await flushSave())) {
-    if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+    showSnackbar(t("toast.saveBlocked"));
     return;
   }
   try {
@@ -568,8 +572,8 @@ async function openNote(path) {
     const view = await ensureEditor();
     state.currentPath = path;
     state.version = data.version ?? null;
+    state.baseMarkdown = data.content ?? "";
     state.dirty = false;
-    state.conflict = false;
     state.pendingMarkdown = null;
     state.pendingWrite = null;
     view.setMarkdown(data.content || "");
@@ -602,7 +606,7 @@ async function createNote(parentPath = "") {
   if (!value) return;
   try {
     if (!(await flushSave())) {
-      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      showSnackbar(t("toast.saveBlocked"));
       return;
     }
     const data = await apiJson("/api/note", { method: "POST", body: { path: value, content: "" } });
@@ -762,7 +766,7 @@ async function renameEntry(row) {
 
   try {
     if (!(await flushSave())) {
-      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      showSnackbar(t("toast.saveBlocked"));
       return;
     }
     const data = await apiJson("/api/rename", {
@@ -791,7 +795,7 @@ async function movePath(path, type, targetFolder) {
   }
   try {
     if (!(await flushSave())) {
-      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      showSnackbar(t("toast.saveBlocked"));
       return;
     }
     const data = await apiJson("/api/rename", {
@@ -822,7 +826,7 @@ async function deleteEntry(row) {
   if (!ok) return;
   try {
     if (!(await flushSave())) {
-      if (!state.conflict) showSnackbar(t("toast.saveBlocked"));
+      showSnackbar(t("toast.saveBlocked"));
       return;
     }
     await apiFetch(`/api/note?path=${encodeURIComponent(path)}`, { method: "DELETE" });
@@ -1153,14 +1157,6 @@ document.addEventListener("visibilitychange", () => {
   else void syncOpenNote();
 });
 window.addEventListener("focus", () => void syncOpenNote());
-
-/* The conflict dialog is deliberately not dismissable: the next save would overwrite the
-   other device's text, so the user has to pick one of the two versions. */
-els.conflictReload.addEventListener("click", () => void reloadFromServer());
-els.conflictOverwrite.addEventListener("click", () => void overwriteWithMine());
-els.conflictDialog.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") event.preventDefault();
-});
 
 window.matchMedia(MOBILE_QUERY).addEventListener("change", () => {
   if (!isMobile() && els.layout.classList.contains("is-collapsed")) setDrawer(false, { persist: false });
