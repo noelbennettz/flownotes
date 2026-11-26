@@ -36,7 +36,9 @@ The shipped `docker-compose.yml` mounts `./data`, maps `8000:8000`, and sets
 `FLOWNOTES_UID:FLOWNOTES_GID` (default `1000:1000`) plus `restart: unless-stopped`. The container's
 entrypoint starts as root, hands `./data` to that uid/gid, and drops to it before uvicorn runs, so
 the directory stays writable and the Markdown files stay editable even when Docker created the
-mount root as root. Do not add `user:` to the service: that skips the chown.
+mount root as root. Setting both ids to `0` (the rootless-Docker case) skips the chown and the
+drop: the process stays root and the files end up owned by the host user that subuid maps to. Do
+not add `user:` to the service: that skips the chown.
 
 Two variants are included: [docker-compose.example.yml](docker-compose.example.yml) documents
 every knob, and [docker-compose.ghcr.yml](docker-compose.ghcr.yml) pulls the published image
@@ -129,7 +131,10 @@ the `.md` files are always complete because writes go through a temporary file a
 
 - Tiptap 2 with `tiptap-markdown`; content is stored as Markdown, not HTML. Headings 1–6,
   bullet/ordered/task lists, code blocks, blockquotes, horizontal rules, bold, italic,
-  strikethrough, inline code and images round-trip.
+  strikethrough, inline code and images round-trip. A single newline stays a newline instead of
+  being folded into a paragraph the first time the note is edited (`breaks: true`, and the
+  serialiser's line-continuation backslash is removed again outside fenced code), so saving
+  does not silently reflow a hand-written file.
 - Input rules convert `# `, `- `, `1. `, `> `, `---` and a fence (` ``` ` + space) as you type.
   `/` opens the command menu (arrows, Enter, Esc also work); `/image` opens a file picker and
   uploads the picture.
@@ -188,20 +193,27 @@ administrator may read them. Legacy `/uploads/<file>` links (from the single-use
 owner on disk, so any signed-in account can read them — move them into an account folder (and
 rewrite the links) if that matters for your deployment.
 
-### Concurrent edits
+### Saving and concurrent edits
+
+Flow Notes is not a collaborative editor. The same account can be signed in on several devices,
+but there is no live sync, no presence and no cursor sharing, and editing one note from two
+devices at the same time is not supported — the saves race, and without the checks below one of
+them would simply be lost. The versioning described here is a safety net for that race, not a
+feature to rely on for teamwork.
 
 `GET /api/note` returns a content-hash `version`. The browser sends it back as `base_version`
 together with the text it last saw as `base_content`; the hash of `base_content` is compared with
 `base_version` to verify the base, and the save happens atomically under the write lock. If the
-file changed in the meantime — another device, another tab, or an SSH edit picked up by the index
-— the server performs a line-based three-way merge of base, stored text and the incoming text.
-Edits in different places are combined and the merged text is written; both devices keep working.
-Two devices changing the same lines differently cannot be merged, so the note keeps the version
-that was already on disk and the incoming text is saved next to it as
-`Name (conflict YYYY-MM-DD HH-MM-SS).md`; nothing is discarded and both notes appear in the tree,
-search and export. The same copy is made when the note was renamed or deleted before the save
-landed, or when the base cannot be verified (a stale or lossy copy, e.g. a file that is not valid
-UTF-8) — merging on an unverified base would be a guess.
+file changed in the meantime — another device, another tab, an SSH edit picked up by the index, or
+a note that was renamed or deleted — the server performs a line-based three-way merge of base,
+stored text and the incoming text. Edits in different places are combined and the merged text is
+written; the next save on either side continues from the merged file. Two devices changing the
+same lines differently cannot be merged, so the note keeps the version that was already on disk
+and the incoming text is saved next to it as `Name (conflict YYYY-MM-DD HH-MM-SS).md`; nothing is
+discarded and both notes appear in the tree, search and export. The same copy is made when the
+note was renamed or deleted before the save landed, or when the base cannot be verified (a stale
+or lossy copy, e.g. a file that is not valid UTF-8) — merging on an unverified base would be a
+guess.
 
 A save without `base_content` (older clients, API calls, and the tab-close keepalive write, whose
 64 KiB body limit cannot carry a second copy of the text) still gets `409` with the current
@@ -265,8 +277,10 @@ new host with the same `FLOWNOTES_DATA` contents. Nothing else is stored outside
 - Every filesystem path is resolved by `resolve_safe_path`: it rejects absolute paths, `..`,
   control characters, components over 255 bytes, paths over 1024 characters, and anything whose
   `resolve()` lands outside the account's root (symlinks included).
-- The CSP sent with every response is `default-src 'self'`, which also blocks a stray external
-  reference from loading.
+- The CSP sent with every response is same-origin: `default-src 'self'`, `img-src 'self' data:
+  blob:`, `style-src`/`script-src 'self' 'unsafe-inline'` for the inline theme script and styles,
+  plus `object-src 'none'`, `base-uri 'none'`, `form-action 'self'` and `frame-ancestors 'none'`.
+  No external origin is allowed to load anything.
 - Uploads: MIME allow-list (no SVG, because scripts), server-generated names, 20 MB cap.
 - The setup wizard creates the first administrator without authentication, which is why
   `FLOWNOTES_SETUP_TOKEN` exists. Set it before exposing the port.
@@ -337,6 +351,7 @@ either, and a browser that learned HSTS for the bare IP would lock you out of pl
 | Searching a Chinese word finds nothing | FTS tokenises whole CJK runs; the LIKE fallback runs only when FTS returns zero rows. Try a shorter prefix. |
 | Upload rejected with `415` | Only PNG, JPEG, GIF, WebP and AVIF are accepted. |
 | Images 403 | You are signed in as another account; only the owner or an administrator may read them. |
+| A note appeared as `Name (conflict …).md` | Two saves touched the same lines. The original keeps the file that was on disk and the copy holds the other text; merge them by hand and delete the copy. This is a race fallback, not collaborative editing. |
 | `/setup` is gone | At least one account exists. Use `/login`, or `python -m app.cli passwd` for a reset. |
 | Everything looks unstyled | `static/vendor/app.css` or the route is blocked by a proxy; check the browser console instead of the app logs. |
 

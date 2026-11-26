@@ -1,9 +1,9 @@
 # Flow Notes
 
-A small, self-hosted note server with an offline-first browser client. Notes are plain
-Markdown files under `data/notes/<account>/`; the folders on disk are the sidebar, and SQLite
-only holds the accounts and a search index that can be rebuilt at any time. Nothing is fetched
-from the network at runtime — no CDN, no web fonts, no remote icons.
+A small, self-hosted note server with a browser client that makes no external requests. Notes
+are plain Markdown files under `data/notes/<account>/`; the folders on disk are the sidebar, and
+SQLite only holds the accounts and a search index that can be rebuilt at any time. Nothing is
+fetched from the network at runtime — no CDN, no web fonts, no remote icons.
 
 ## Features
 
@@ -16,9 +16,11 @@ from the network at runtime — no CDN, no web fonts, no remote icons.
   quotes, dividers, bold/italic/strikethrough/inline code, images. `/` opens the command menu,
   `# ` / `- ` / `1. ` / `> ` / `---` and a fence (` ``` ` + space) convert as you type; pasted
   screenshots are uploaded automatically, and edits autosave 600 ms after the last keystroke.
-  Saves are versioned, so a note edited on two devices is never merged blindly. By default this
-  device's text wins (Settings → Editing) and a snackbar says the other version was replaced; turn
-  that option off to get a dialog that lets you pick which text to keep.
+  Every save quotes the version it started from: if another device or an SSH edit wrote the file
+  first, edits in different places are merged; edits that touch the same lines keep one text and
+  store the other as a `(conflict …)` note. This is a safety net for races, not collaboration —
+  there is no live sync, presence or cursor sharing, and Flow Notes does not support editing one
+  note on several devices at the same time.
 - **Search.** SQLite FTS5 with highlighted excerpts, plus a substring fallback for CJK queries.
 - **Interface.** Material 3 in seven languages (English, Traditional and Simplified Chinese,
   Arabic with full RTL, French, Russian, Spanish), light/dark/system themes and six accent tones.
@@ -76,8 +78,10 @@ editor dependencies.
 
 The container starts its entrypoint as root only to chown `./data` to
 `FLOWNOTES_UID`/`FLOWNOTES_GID` (default `1000:1000`) and then runs uvicorn as that user, so
-`mkdir -p data` is optional and the notes never belong to root. Keep `user:` out of the Compose
-service — it would skip the chown and bring back the old permission error.
+`mkdir -p data` is optional and the notes never belong to root. Setting both to `0` (the rootless
+case) skips the chown and the drop, which is what makes the files belong to the mapped host user.
+Keep `user:` out of the Compose service — it would skip the chown and bring back the old
+permission error.
 
 On rootless Docker the container uid maps to a subuid, so the default `1000:1000` writes files
 your host account cannot read. Put `FLOWNOTES_UID=0` and `FLOWNOTES_GID=0` in a `.env` next to
@@ -95,8 +99,10 @@ data/
 ```
 
 Stop the container and copy `data/` for a backup; notes can also be copied while it runs, since
-every note write replaces the file atomically (uploads are written in one go). The index is derived data, but it also holds the
-accounts — export the notes before deleting it.
+every note write replaces the file atomically. Uploads are streamed into their final file name,
+so a backup taken during an upload can contain that one partial image; copy while nothing is
+uploading if that matters. The index is derived data, but it also holds the accounts — export the
+notes before deleting it.
 
 ## Forgot the admin password
 

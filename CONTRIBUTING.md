@@ -22,7 +22,7 @@ in their spare time, so a focused change with a clear commit message goes a long
 
 ## Requirements
 
-- Python 3.11 or newer. The image pins 3.11; the test suite has also been run on 3.14.
+- Python 3.11 or newer. The image pins 3.11; the app has also been run locally on 3.14.
 - Node.js 20 for `vendor-build/` only. The committed bundle means you do not need Node to
   run the app.
 - Optional: Docker with Compose, `actionlint` for the workflow, a browser for manual checks.
