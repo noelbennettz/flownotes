@@ -14,7 +14,7 @@ requests: no CDN, no web fonts, no remote icons.
 ## Requirements
 
 - Docker with Compose (recommended), or Python 3.11+ for a manual install.
-- About 170 MB of disk for the image, plus whatever the notes take.
+- About 170 MB of disk for the image (about 51 MB compressed), plus whatever the notes take.
 - A reverse proxy that terminates TLS if the service is not on a trusted LAN.
 
 The Python process idles at roughly 50–60 MB RSS and stays under about 100 MB through a burst of

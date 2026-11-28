@@ -43,7 +43,7 @@ fetched from the network at runtime — no CDN, no web fonts, no remote icons.
 ## Requirements
 
 - Docker with Compose (recommended), or Python 3.11+ for a manual install.
-- A directory for `data/`; the image itself is about 170 MB.
+- A directory for `data/`; the image is about 170 MB on disk (about 51 MB compressed).
 
 ## Quick start
 
