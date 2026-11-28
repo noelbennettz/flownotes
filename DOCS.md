@@ -1,4 +1,9 @@
-# Flow Notes — technical documentation
+# Flow Notes documentation
+
+> This tree documents the current `master`, published as
+> `ghcr.io/noelbennettz/flownotes:latest` (also tagged `master` and
+> `sha-<commit>`). There are no numbered releases, so there is no per-version
+> documentation.
 
 This file is the reference: installation detail, data layout, internals, the API, operations
 and troubleshooting. The [README](README.md) is the short version.
@@ -264,6 +269,32 @@ the directory when you are sure.
 
 Stop the container, copy `data/` (including `.session-secret` to keep sessions), start it on the
 new host with the same `FLOWNOTES_DATA` contents. Nothing else is stored outside the image.
+
+## Removing it
+
+`./data` is a bind mount, not a named volume, so compose never deletes it. What
+each command removes:
+
+| Command | Removes | Keeps |
+| --- | --- | --- |
+| `docker compose stop` | the running container | the container, `./data`, the image |
+| `docker compose down` | the container and the compose network | `./data`, the image, the compose file |
+| `docker compose down -v` | the above and any named volumes the file declares | `./data` — it is a bind mount, remove it yourself |
+| `docker compose down --rmi all` | the container, the network and the image | `./data` |
+| `rm -rf data/` | every note, every upload, the index, the trash and the session secret | the image, the compose file |
+
+`rm -rf data/` cannot be undone: the `.md` files are the only copy of the notes,
+and `index.db` is an index over them that can be rebuilt, not a backup. Copy
+`data/` while the service is stopped first ([Data layout](#data-layout)).
+
+Deleting an account is a different operation: **Settings → Users → Delete** moves
+its notes and uploads into `data/trash/` and leaves them there until you delete
+that directory.
+
+Nothing else is written: no cron job, no systemd unit, no file outside `./data`
+and the container, and the published port carries no firewall rules of its own.
+The reverse proxy in front, if there is one, is a separate configuration to
+remove.
 
 ## Security notes
 
